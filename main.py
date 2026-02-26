@@ -351,6 +351,10 @@ def build_ui(root: tk.Tk, config: dict) -> None:
         display = get_field(game, "name") or get_field(game, "path") or "(不明)"
         listbox.delete(idx)
         listbox.insert(idx, display)
+        rom_base = resolve_paths(config, system_var.get())["rom_path"]
+        path_val = get_field(game, "path")
+        if path_val and not (Path(rom_base) / path_val).exists():
+            listbox.itemconfig(idx, fg="#cc0000")
 
     def on_select(event=None) -> None:
         sel = listbox.curselection()
@@ -424,9 +428,13 @@ def build_ui(root: tk.Tk, config: dict) -> None:
             return
         state.update({"root_elem": root_elem, "games": games, "decl": decl, "selected": -1})
         listbox.delete(0, "end")
-        for game in games:
+        rom_base = resolve_paths(config, system_var.get())["rom_path"]
+        for i, game in enumerate(games):
             display = get_field(game, "name") or get_field(game, "path") or "(不明)"
             listbox.insert("end", display)
+            path_val = get_field(game, "path")
+            if path_val and not (Path(rom_base) / path_val).exists():
+                listbox.itemconfig(i, fg="#cc0000")
         path_label.config(text="")
         for widget in field_widgets.values():
             if isinstance(widget, tk.Text):
