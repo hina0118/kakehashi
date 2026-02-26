@@ -135,6 +135,21 @@ def detect_environment(config: dict) -> str:
     return "windows" if platform.system() == "Windows" else "steam_deck"
 
 
+def discover_systems(config: dict) -> list[str]:
+    """gamelist_base 配下のフォルダ名からシステム一覧を取得する。
+    フォルダが見つからない場合は config.json の systems にフォールバックする。
+    """
+    env = detect_environment(config)
+    base = config.get(env, {}).get("gamelist_base", "")
+    if base:
+        p = Path(base)
+        if p.is_dir():
+            dirs = sorted(d.name for d in p.iterdir() if d.is_dir())
+            if dirs:
+                return dirs
+    return config.get("systems", [])
+
+
 def resolve_paths(config: dict, system: str) -> dict:
     env = detect_environment(config)
     base = config.get(env, {})
@@ -197,7 +212,7 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     btn_load_file = tk.Button(topbar, text="読み込み", width=8, font=("Arial", 9))
     btn_load_file.pack(side="right", pady=5)
 
-    systems = config.get("systems", [])
+    systems = discover_systems(config)
     current_system = config.get("system", systems[0] if systems else "")
     system_var = tk.StringVar(value=current_system)
     combo = ttk.Combobox(topbar, textvariable=system_var, values=systems, state="readonly", width=10, font=("Arial", 9))
