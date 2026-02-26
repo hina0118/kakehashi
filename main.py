@@ -102,6 +102,7 @@ class TagInput(tk.Frame):
 
     def set_tags(self, tags: list[str]) -> None:
         self._tags = [t for t in tags if t]
+        self._var.set("")  # 入力途中のテキストもクリア
         self._render()
 
     def get_tags(self) -> list[str]:
