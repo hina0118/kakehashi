@@ -1,6 +1,8 @@
 import json
 import re
 import shutil
+import urllib.parse
+import webbrowser
 import tkinter as tk
 import xml.etree.ElementTree as ET
 from datetime import date, datetime
@@ -13,7 +15,7 @@ from tkcalendar import DateEntry
 CONFIG_PATH       = Path(__file__).parent / "config.json"
 WINDOW_STATE_PATH = Path(__file__).parent / "window_state.json"
 
-DEFAULT_GEOMETRY = "960x640"
+DEFAULT_GEOMETRY = "1100x700"
 
 
 # ── カスタムウィジェット ──────────────────────────────────────────
@@ -219,13 +221,18 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     listbox.pack(side="left", fill="both", expand=True)
     lb_scroll.config(command=listbox.yview)
 
-    # ── 右ペイン：編集フォーム ───────────────────────────────
-    right_frame = tk.Frame(paned)
-    paned.add(right_frame, minsize=400)
-    tk.Label(right_frame, text="ゲーム情報の編集", font=("Arial", 9, "bold"), anchor="w").pack(fill="x", padx=12, pady=(8, 4))
-    tk.Frame(right_frame, height=1, bg="#dddddd").pack(fill="x", padx=8)
+    # ── 中央ペイン：編集フォーム ──────────────────────────────
+    mid_frame = tk.Frame(paned)
+    paned.add(mid_frame, minsize=400)
+    tk.Label(mid_frame, text="ゲーム情報の編集", font=("Arial", 9, "bold"), anchor="w").pack(fill="x", padx=12, pady=(8, 4))
+    tk.Frame(mid_frame, height=1, bg="#dddddd").pack(fill="x", padx=8)
 
-    form = tk.Frame(right_frame)
+    # 検索バー（下部固定）
+    search_bar_frame = tk.Frame(mid_frame, bg="#f5f5f5")
+    search_bar_frame.pack(side="bottom", fill="x")
+    tk.Frame(mid_frame, height=1, bg="#e0e0e0").pack(side="bottom", fill="x")
+
+    form = tk.Frame(mid_frame)
     form.pack(fill="both", expand=True, padx=8, pady=6)
     form.columnconfigure(1, weight=1)
 
@@ -333,6 +340,53 @@ def build_ui(root: tk.Tk, config: dict) -> None:
         fill_form(state["games"][idx])
 
     listbox.bind("<<ListboxSelect>>", on_select)
+
+    # ── 検索バー ────────────────────────────────────────────
+    tk.Label(search_bar_frame, text="Web検索:", font=("Arial", 9, "bold"), bg="#f5f5f5").pack(
+        side="left", padx=(10, 6), pady=6
+    )
+
+    _search_sites = [
+        ("DuckDuckGo", "https://duckduckgo.com/?q={query}"),
+        ("Google",     "https://www.google.com/search?q={query}"),
+        ("Wikipedia",  "https://ja.wikipedia.org/w/index.php?search={query}"),
+        ("Famitsu",    "https://www.famitsu.com/search/?q={query}"),
+    ]
+
+    def open_search(url_template: str) -> None:
+        name_widget = field_widgets.get("name")
+        name = name_widget.get().strip() if isinstance(name_widget, tk.Entry) else ""
+        if name:
+            query = urllib.parse.quote(f"{name} {system_var.get()}")
+            webbrowser.open(url_template.format(query=query))
+
+    for _site_name, _tmpl in _search_sites:
+        tk.Button(
+            search_bar_frame, text=_site_name, font=("Arial", 9),
+            relief="groove", padx=6, pady=2, cursor="hand2", bg="#f5f5f5",
+            command=lambda t=_tmpl: open_search(t),
+        ).pack(side="left", padx=(0, 4), pady=5)
+
+    tk.Frame(search_bar_frame, width=1, bg="#cccccc").pack(side="left", fill="y", padx=(4, 8), pady=6)
+    tk.Label(search_bar_frame, text="翻訳:", font=("Arial", 9, "bold"), bg="#f5f5f5").pack(side="left", padx=(0, 6))
+
+    _translate_sites = [
+        ("DeepL",      "https://www.deepl.com/translator#en/ja/{text}"),
+        ("Google翻訳", "https://translate.google.com/?sl=auto&tl=ja&text={text}&op=translate"),
+    ]
+
+    def open_translate(url_template: str) -> None:
+        desc_widget = field_widgets.get("desc")
+        text = desc_widget.get("1.0", "end-1c").strip() if isinstance(desc_widget, tk.Text) else ""
+        if text:
+            webbrowser.open(url_template.format(text=urllib.parse.quote(text)))
+
+    for _site_name, _tmpl in _translate_sites:
+        tk.Button(
+            search_bar_frame, text=_site_name, font=("Arial", 9),
+            relief="groove", padx=6, pady=2, cursor="hand2", bg="#f5f5f5",
+            command=lambda t=_tmpl: open_translate(t),
+        ).pack(side="left", padx=(0, 4), pady=5)
 
     def load_file() -> None:
         path = resolve_paths(config, system_var.get())["gamelist_path"]
