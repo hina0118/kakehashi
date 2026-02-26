@@ -29,6 +29,14 @@ EmulationStation Desktop Edition (ES-DE) において、標準のスクレイパ
 | DeepL | 説明文を英日翻訳 |
 | Google翻訳 | 説明文を英日翻訳 |
 
+### PC間同期（Windows → Steam Deck）
+SSH/SFTPを使ってWindowsで編集したデータをSteam Deckへ転送します。
+
+* **「同期」タブ**でSSH接続設定（IP・ユーザー名・パスワード）を入力し、接続テスト
+* 転送内容を選択: `gamelist.xml` / メディアファイル（フォルダ単位で選択可）
+* 既存ファイルのスキップ（差分のみ）または上書きを選択
+* 転送はバックグラウンドスレッドで実行され、ログエリアにリアルタイム表示
+
 ### 環境の自動判別
 `platform.system()` でOSを自動判別し、Windows / Steam Deck のパス設定を切り替えます。
 `config.json` に `environment` を明示した場合はそちらが優先されます。
@@ -73,6 +81,8 @@ EmulationStation Desktop Edition (ES-DE) において、標準のスクレイパ
 * **GUIフレームワーク**: tkinter（標準ライブラリ）
 * **外部ライブラリ**:
   * `tkcalendar` — カレンダー形式の日付入力
+  * `Pillow` — 画像サムネイル・フルサイズ表示、画像クロップ
+  * `paramiko` — SSH/SFTP経由のPC間ファイル転送
 * **パッケージ管理**: uv（推奨）または pip
 * **プラットフォーム**: Windows 11 / SteamOS (Linux)
 
@@ -94,21 +104,80 @@ EmulationStation Desktop Edition (ES-DE) において、標準のスクレイパ
     "rom_base": "/run/media/mmcblk0p1/Emulation/roms",
     "gamelist_base": "/home/deck/.emulationstation/gamelists",
     "media_base": "/home/deck/.emulationstation/downloaded_media"
+  },
+  "sync": {
+    "host": "192.168.1.xxx",
+    "port": 22,
+    "username": "deck",
+    "password": "your_password"
   }
 }
 ```
 
-* `environment` キーは**省略可**。省略するとOSを自動判別します（Windows / Steam Deck）
-* `systems` は `gamelist_base` 配下のフォルダが存在する場合は自動検出されるため省略可
+| キー | 説明 | 省略 |
+|---|---|---|
+| `environment` | `"windows"` または `"steam_deck"` を明示 | 可（OS自動判別） |
+| `systems` | 機種リスト | 可（`gamelist_base` 配下フォルダを自動検出） |
+| `sync.host` | Steam DeckのIPアドレス | 同期タブで入力・自動保存 |
+| `sync.port` | SSHポート番号（既定: 22） | 同期タブで入力・自動保存 |
+| `sync.username` | SSHユーザー名（既定: `deck`） | 同期タブで入力・自動保存 |
+| `sync.password` | SSHパスワード | 同期タブで入力・自動保存 |
 
 ---
 
-## 7. 運用上の注意点
+## 7. PC間同期機能の使い方
+
+WindowsでメタデータやメディアファイルをそろえたあとSteam DeckへSSH転送する機能です。
+
+### 7.1 Steam Deck側の準備（初回のみ）
+
+Steam Deckのデスクトップモードで **Konsole（ターミナル）** を開き、以下を実行します。
+
+```bash
+# SSHサーバーを有効化（SteamOS 3.x は systemd ベース）
+sudo systemctl enable --now sshd
+
+# deckユーザーにパスワードを設定（未設定の場合）
+passwd deck
+```
+
+Steam DeckのIPアドレスはKonsoleで確認できます。
+
+```bash
+ip addr show | grep "inet "
+# 例: inet 192.168.1.42/24 brd ...  → 192.168.1.42 がIPアドレス
+```
+
+> **注意**: Steam DeckはSteamモードに戻るとSSHサーバーが停止する場合があります。
+> 転送する際は**デスクトップモード**のままにしておくか、`sudo systemctl start sshd` で都度起動してください。
+
+### 7.2 kakehashiでの転送手順
+
+1. **「同期」タブ**を開く
+2. **SSH接続設定**にSteam DeckのIPアドレス・ユーザー名・パスワードを入力
+3. **「接続テスト & 保存」**ボタンをクリック → 「✓ 接続成功」と表示されることを確認（設定はconfig.jsonに自動保存）
+4. 上部の**対象機種**コンボから転送したい機種を選択
+5. **転送内容**（`gamelist.xml` / メディアフォルダ）を選択
+6. メディアの場合は**フォルダ種別**（covers / screenshots / videos など）を選択
+7. **既存ファイル**の扱いを選択: 「スキップ（差分のみ）」または「上書き」
+8. **「転送実行」**ボタンをクリック → ログエリアに進捗が表示される
+
+### 7.3 転送先パス（参考）
+
+| 種別 | Steam Deck上のパス |
+|---|---|
+| gamelist.xml | `~/.emulationstation/gamelists/{機種}/gamelist.xml` |
+| メディア | `~/.emulationstation/downloaded_media/{機種}/{フォルダ}/` |
+
+---
+
+## 8. 運用上の注意点
 * ES-DEが起動している間に `gamelist.xml` を上書きすると、ES-DE終了時にデータが消える可能性があります。**必ずES-DEを終了させた状態で実行**してください。
+* PC間同期は **Windows → Steam Deck の一方向転送**です。Steam Deck側で編集したデータをWindowsへ戻す機能はありません。
 
 ---
 
-## 8. WindowsとSteam Deckの「パス」の違い
+## 9. WindowsとSteam Deckの「パス」の違い
 
 | 項目 | Windowsでの標準的な場所 | Steam Deck (Linux) での場所 |
 |---|---|---|
@@ -189,3 +258,27 @@ Steam Deckでは、SDカードのパスが個体によって異なる場合が�
 `gamelist.xml` を更新した後は、ES-DEを再起動するか、ES-DEのメニューから
 `「MAIN MENU」>「UI SETTINGS」>「RELOAD ALL MIXED IMAGES」` を実行してください。
 ※ES-DEが起動中にスクリプトを実行すると、ES-DE終了時にデータが上書きされる可能性があるため、ES-DEを閉じてからの実行を推奨します。
+
+**同期タブが「paramiko がインストールされていません」と表示される**
+以下のいずれかを実行してください。
+
+```bash
+# uv を使う場合
+uv sync
+
+# pip を使う場合
+pip install paramiko
+```
+
+**「接続テスト」で ✗ エラーになる**
+
+| 原因 | 対処 |
+|---|---|
+| Steam DeckのSSHが起動していない | Steam DeckのKonsoleで `sudo systemctl start sshd` を実行 |
+| IPアドレスが違う | `ip addr show` で現在のIPを再確認 |
+| パスワードが未設定 | `passwd deck` でパスワードを設定 |
+| ファイアウォール | Steam DeckはデフォルトでSSHポート(22)を開放しているため通常不要 |
+| 同じLAN内にない | WindowsとSteam Deckが同じWi-Fiまたは有線LANに接続されているか確認 |
+
+**転送後にES-DEに反映されない**
+Steam DeckのES-DEを再起動するか、`「MAIN MENU」>「UI SETTINGS」>「RELOAD ALL MIXED IMAGES」` を実行してください。

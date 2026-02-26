@@ -12,5 +12,11 @@
     "rom_base": "/run/media/mmcblk0p1/Emulation/roms",
     "gamelist_base": "/home/deck/.emulationstation/gamelists",
     "media_base": "/home/deck/.emulationstation/downloaded_media"
+  },
+  "sync": {
+    "host": "",
+    "port": 22,
+    "username": "deck",
+    "password": ""
   }
 }
