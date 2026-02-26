@@ -12,6 +12,11 @@ from pathlib import Path
 
 from tkcalendar import DateEntry
 
+import locale
+try:
+    locale.setlocale(locale.LC_ALL, "")
+except locale.Error:
+    locale.setlocale(locale.LC_ALL, "C")
 
 CONFIG_PATH       = Path(__file__).parent / "config.json"
 WINDOW_STATE_PATH = Path(__file__).parent / "window_state.json"
@@ -155,9 +160,9 @@ def resolve_paths(config: dict, system: str) -> dict:
     env = detect_environment(config)
     base = config.get(env, {})
     return {
-        "rom_path":      f"{base.get('rom_base', '')}/{system}",
-        "gamelist_path": f"{base.get('gamelist_base', '')}/{system}/gamelist.xml",
-        "media_path":    f"{base.get('media_base', '')}/{system}",
+        "rom_path":      str(Path(base.get("rom_base",      "")) / system),
+        "gamelist_path": str(Path(base.get("gamelist_base", "")) / system / "gamelist.xml"),
+        "media_path":    str(Path(base.get("media_base",    "")) / system),
     }
 
 
