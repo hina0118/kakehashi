@@ -1,6 +1,7 @@
 import json
 import re
 import shutil
+import platform
 import urllib.parse
 import webbrowser
 import tkinter as tk
@@ -101,6 +102,7 @@ class TagInput(tk.Frame):
 
     def set_tags(self, tags: list[str]) -> None:
         self._tags = [t for t in tags if t]
+        self._var.set("")  # 入力途中のテキストもクリア
         self._render()
 
     def get_tags(self) -> list[str]:
@@ -127,8 +129,30 @@ def save_window_state(root: tk.Tk) -> None:
         json.dump({"geometry": root.geometry()}, f, indent=2)
 
 
+def detect_environment(config: dict) -> str:
+    """config.json の environment を優先し、未設定の場合は OS を自動判別する。"""
+    if env := config.get("environment"):
+        return env
+    return "windows" if platform.system() == "Windows" else "steam_deck"
+
+
+def discover_systems(config: dict) -> list[str]:
+    """gamelist_base 配下のフォルダ名からシステム一覧を取得する。
+    フォルダが見つからない場合は config.json の systems にフォールバックする。
+    """
+    env = detect_environment(config)
+    base = config.get(env, {}).get("gamelist_base", "")
+    if base:
+        p = Path(base)
+        if p.is_dir():
+            dirs = sorted(d.name for d in p.iterdir() if d.is_dir())
+            if dirs:
+                return dirs
+    return config.get("systems", [])
+
+
 def resolve_paths(config: dict, system: str) -> dict:
-    env = config.get("environment", "windows")
+    env = detect_environment(config)
     base = config.get(env, {})
     return {
         "rom_path":      f"{base.get('rom_base', '')}/{system}",
@@ -189,14 +213,14 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     btn_load_file = tk.Button(topbar, text="読み込み", width=8, font=("Arial", 9))
     btn_load_file.pack(side="right", pady=5)
 
-    systems = config.get("systems", [])
+    systems = discover_systems(config)
     current_system = config.get("system", systems[0] if systems else "")
     system_var = tk.StringVar(value=current_system)
     combo = ttk.Combobox(topbar, textvariable=system_var, values=systems, state="readonly", width=10, font=("Arial", 9))
     combo.pack(side="right", padx=(4, 8), pady=5)
     tk.Label(topbar, text="対象機種:", font=("Arial", 9), bg="#f5f5f5").pack(side="right", pady=5)
 
-    env = config.get("environment", "unknown")
+    env = detect_environment(config)
     tk.Label(topbar, text=f"環境: {env}", font=("Arial", 9), fg="#666", bg="#f5f5f5").pack(side="right", padx=(12, 4), pady=5)
 
     tk.Frame(root, height=1, bg="#cccccc").pack(fill="x")
