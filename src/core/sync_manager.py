@@ -74,11 +74,12 @@ def transfer_files(
     for i, (lp, rp) in enumerate(tasks, 1):
         if not overwrite:
             try:
-                sftp.stat(rp)
-                on_log(f"  → スキップ: {lp.name}")
-                skipped += 1
-                on_progress(i * 100 // total)
-                continue
+                remote_size = sftp.stat(rp).st_size
+                if remote_size == lp.stat().st_size:
+                    on_log(f"  → スキップ: {lp.name}")
+                    skipped += 1
+                    on_progress(i * 100 // total)
+                    continue
             except FileNotFoundError:
                 pass
 
@@ -168,10 +169,11 @@ def pull_files(
 
     for i, (rp, lp) in enumerate(tasks, 1):
         if not overwrite and lp.exists():
-            on_log(f"  → スキップ: {lp.name}")
-            skipped += 1
-            on_progress(i * 100 // total)
-            continue
+            if sftp.stat(rp).st_size == lp.stat().st_size:
+                on_log(f"  → スキップ: {lp.name}")
+                skipped += 1
+                on_progress(i * 100 // total)
+                continue
 
         lp.parent.mkdir(parents=True, exist_ok=True)
         try:
