@@ -1,6 +1,8 @@
 import json
+import os
 import re
 import shutil
+import subprocess
 import platform
 import urllib.parse
 import webbrowser
@@ -12,6 +14,12 @@ from pathlib import Path
 
 from tkcalendar import DateEntry
 
+try:
+    from PIL import Image, ImageTk
+    _PIL_OK = True
+except ImportError:
+    _PIL_OK = False
+
 import locale
 try:
     locale.setlocale(locale.LC_ALL, "")
@@ -22,6 +30,17 @@ CONFIG_PATH       = Path(__file__).parent / "config.json"
 WINDOW_STATE_PATH = Path(__file__).parent / "window_state.json"
 
 DEFAULT_GEOMETRY = "1100x700"
+
+MEDIA_FOLDERS = [
+    "3dboxes", "backcovers", "covers", "fanart", "manuals",
+    "marquees", "miximages", "physicalmedia", "screenshots",
+    "titlescreens", "videos",
+]
+
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tga"}
+VIDEO_SUFFIXES = {".mp4", ".mkv", ".avi", ".webm", ".mov", ".m4v"}
+
+THUMB_W, THUMB_H = 96, 72  # メディアタブのサムネイルサイズ
 
 
 # ── カスタムウィジェット ──────────────────────────────────────────
@@ -202,6 +221,182 @@ def save_gamelist_file(path: str, content: str, backup_max: int) -> None:
     p.write_text(content, encoding="utf-8")
 
 
+# ── メディアチェック ─────────────────────────────────────────────
+
+def get_rom_stem(path_val: str) -> str:
+    """gamelist.xml の <path> 値から拡張子なしファイル名を返す。
+    例: "./Super Mario World.zip" → "Super Mario World"
+    """
+    return Path(path_val).stem
+
+
+def check_media_for_game(media_path: str, rom_stem: str) -> dict[str, bool]:
+    """11種のメディアフォルダそれぞれに rom_stem.* が存在するか確認する。"""
+    base = Path(media_path)
+    return {
+        folder: bool(list((base / folder).glob(f"{rom_stem}.*")))
+        for folder in MEDIA_FOLDERS
+    }
+
+
+def find_media_files(media_path: str, rom_stem: str) -> dict[str, "Path | None"]:
+    """各メディアフォルダの最初にマッチしたファイルパスを返す。なければ None。"""
+    base = Path(media_path)
+    result: dict[str, "Path | None"] = {}
+    for folder in MEDIA_FOLDERS:
+        folder_path = base / folder
+        if folder_path.is_dir():
+            matches = list(folder_path.glob(f"{rom_stem}.*"))
+            result[folder] = matches[0] if matches else None
+        else:
+            result[folder] = None
+    return result
+
+
+def open_with_default_app(file_path: Path) -> None:
+    """ファイルをOSのデフォルトアプリで開く（Windows: os.startfile / Linux: xdg-open）。"""
+    if platform.system() == "Windows":
+        os.startfile(file_path)
+    else:
+        subprocess.Popen(["xdg-open", str(file_path)])
+
+
+def open_fullsize_image(parent: tk.Widget, file_path: Path, folder_name: str) -> None:
+    """画像をフルサイズで表示する。スクリーンサイズを超える場合は縮小して表示。"""
+    try:
+        img = Image.open(file_path)
+    except Exception as e:
+        messagebox.showerror("画像読み込みエラー", str(e), parent=parent)
+        return
+
+    orig_w, orig_h = img.size
+
+    win = tk.Toplevel(parent)
+    win.title(f"{folder_name}  —  {file_path.name}  ({orig_w}×{orig_h})")
+
+    # スクリーンの85%以内に収まるようスケーリング（拡大はしない）
+    max_w = int(win.winfo_screenwidth()  * 0.85)
+    max_h = int(win.winfo_screenheight() * 0.85)
+    scale  = min(max_w / orig_w, max_h / orig_h, 1.0)
+    disp_w = max(1, int(orig_w * scale))
+    disp_h = max(1, int(orig_h * scale))
+
+    disp_img = img.resize((disp_w, disp_h), Image.LANCZOS) if scale < 1.0 else img
+    photo    = ImageTk.PhotoImage(disp_img)
+
+    win.geometry(f"{disp_w}x{disp_h}")
+    win.resizable(False, False)
+
+    lbl = tk.Label(win, image=photo, cursor="hand2")
+    lbl.image = photo  # ガベージコレクション防止
+    lbl.pack()
+
+    # クリック または Escape で閉じる
+    lbl.bind("<Button-1>", lambda e: win.destroy())
+    win.bind("<Escape>",   lambda e: win.destroy())
+    win.focus_set()
+
+
+def open_media_check_window(parent: tk.Tk, config: dict, system: str, games: list[ET.Element]) -> None:
+    """メディアファイル過不足チェックダイアログを開く。"""
+    media_path = resolve_paths(config, system)["media_path"]
+
+    win = tk.Toplevel(parent)
+    win.title(f"メディアチェック - {system}")
+    win.geometry("900x500")
+    win.minsize(600, 300)
+
+    # ── ヘッダー情報 ────────────────────────────────────────────
+    header_frame = tk.Frame(win, bg="#f5f5f5")
+    header_frame.pack(fill="x", padx=8, pady=(8, 0))
+
+    summary_label = tk.Label(header_frame, text="", font=("Arial", 9), bg="#f5f5f5", anchor="w")
+    summary_label.pack(side="left")
+
+    only_missing_var = tk.BooleanVar(value=False)
+    chk = tk.Checkbutton(
+        header_frame, text="欠損のみ表示", variable=only_missing_var,
+        font=("Arial", 9), bg="#f5f5f5",
+    )
+    chk.pack(side="right", padx=8)
+
+    tk.Frame(win, height=1, bg="#cccccc").pack(fill="x", padx=0, pady=(6, 0))
+
+    # ── テーブルエリア ──────────────────────────────────────────
+    table_frame = tk.Frame(win)
+    table_frame.pack(fill="both", expand=True, padx=8, pady=4)
+
+    columns = ["title"] + MEDIA_FOLDERS
+    col_headers = ["タイトル"] + MEDIA_FOLDERS
+
+    tree = ttk.Treeview(table_frame, columns=columns, show="headings", selectmode="none")
+
+    # 列幅設定
+    tree.column("title", width=200, minwidth=120, anchor="w")
+    for folder in MEDIA_FOLDERS:
+        tree.column(folder, width=72, minwidth=56, anchor="center")
+
+    for col, header in zip(columns, col_headers):
+        tree.heading(col, text=header)
+
+    # スクロールバー
+    vsb = ttk.Scrollbar(table_frame, orient="vertical",   command=tree.yview)
+    hsb = ttk.Scrollbar(table_frame, orient="horizontal", command=tree.xview)
+    tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+    tree.grid(row=0, column=0, sticky="nsew")
+    vsb.grid(row=0,  column=1, sticky="ns")
+    hsb.grid(row=1,  column=0, sticky="ew")
+    table_frame.rowconfigure(0, weight=1)
+    table_frame.columnconfigure(0, weight=1)
+
+    # 行カラータグ
+    tree.tag_configure("ok",      background="white")
+    tree.tag_configure("missing", background="#fff0f0")
+
+    # ── データ収集・描画 ────────────────────────────────────────
+    def get_field_local(game: ET.Element, key: str) -> str:
+        el = game.find(key)
+        return (el.text or "") if el is not None else ""
+
+    rows: list[tuple[str, dict[str, bool], bool]] = []  # (title, result_dict, has_missing)
+    for game in games:
+        path_val = get_field_local(game, "path")
+        title    = get_field_local(game, "name") or path_val or "(不明)"
+        if not path_val:
+            rows.append((title, {f: False for f in MEDIA_FOLDERS}, True))
+            continue
+        stem   = get_rom_stem(path_val)
+        result = check_media_for_game(media_path, stem)
+        has_missing = not all(result.values())
+        rows.append((title, result, has_missing))
+
+    missing_count = sum(1 for _, _, hm in rows if hm)
+
+    def refresh_table() -> None:
+        tree.delete(*tree.get_children())
+        show_missing_only = only_missing_var.get()
+        for title, result, has_missing in rows:
+            if show_missing_only and not has_missing:
+                continue
+            values = [title] + ["○" if result[f] else "-" for f in MEDIA_FOLDERS]
+            tag = "missing" if has_missing else "ok"
+            tree.insert("", "end", values=values, tags=(tag,))
+
+    def update_summary() -> None:
+        summary_label.config(text=f"{len(games)} ゲーム中 {missing_count} ゲームに欠損あり")
+
+    only_missing_var.trace_add("write", lambda *_: refresh_table())
+
+    update_summary()
+    refresh_table()
+
+    # ── フッター ────────────────────────────────────────────────
+    tk.Frame(win, height=1, bg="#cccccc").pack(fill="x")
+    footer = tk.Frame(win, bg="#f5f5f5")
+    footer.pack(fill="x", pady=6)
+    tk.Button(footer, text="閉じる", width=8, font=("Arial", 9), command=win.destroy).pack(side="right", padx=12)
+
+
 # ── UI ───────────────────────────────────────────────────────────
 
 def build_ui(root: tk.Tk, config: dict) -> None:
@@ -217,6 +412,8 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     btn_save_file.pack(side="right", padx=(4, 12), pady=5)
     btn_load_file = tk.Button(topbar, text="読み込み", width=8, font=("Arial", 9))
     btn_load_file.pack(side="right", pady=5)
+    btn_media_check = tk.Button(topbar, text="メディアチェック", font=("Arial", 9), state="disabled")
+    btn_media_check.pack(side="right", padx=(4, 8), pady=5)
 
     systems = discover_systems(config)
     current_system = config.get("system", systems[0] if systems else "")
@@ -250,18 +447,23 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     listbox.pack(side="left", fill="both", expand=True)
     lb_scroll.config(command=listbox.yview)
 
-    # ── 中央ペイン：編集フォーム ──────────────────────────────
+    # ── 中央ペイン：タブ ──────────────────────────────────────
     mid_frame = tk.Frame(paned)
     paned.add(mid_frame, minsize=400)
-    tk.Label(mid_frame, text="ゲーム情報の編集", font=("Arial", 9, "bold"), anchor="w").pack(fill="x", padx=12, pady=(8, 4))
-    tk.Frame(mid_frame, height=1, bg="#dddddd").pack(fill="x", padx=8)
+
+    notebook = ttk.Notebook(mid_frame)
+    notebook.pack(fill="both", expand=True)
+
+    # ── タブ1: 編集 ────────────────────────────────────────
+    tab_edit = tk.Frame(notebook)
+    notebook.add(tab_edit, text="編集")
 
     # 検索バー（下部固定）
-    search_bar_frame = tk.Frame(mid_frame, bg="#f5f5f5")
+    search_bar_frame = tk.Frame(tab_edit, bg="#f5f5f5")
     search_bar_frame.pack(side="bottom", fill="x")
-    tk.Frame(mid_frame, height=1, bg="#e0e0e0").pack(side="bottom", fill="x")
+    tk.Frame(tab_edit, height=1, bg="#e0e0e0").pack(side="bottom", fill="x")
 
-    form = tk.Frame(mid_frame)
+    form = tk.Frame(tab_edit)
     form.pack(fill="both", expand=True, padx=8, pady=6)
     form.columnconfigure(1, weight=1)
 
@@ -320,6 +522,48 @@ def build_ui(root: tk.Tk, config: dict) -> None:
             widget.grid(row=grid_row, column=1, sticky="ew", pady=(2, 2), padx=(4, 0))
         field_widgets[key] = widget
 
+    # ── タブ2: メディア ────────────────────────────────────
+    tab_media = tk.Frame(notebook)
+    notebook.add(tab_media, text="メディア")
+
+    media_header_label = tk.Label(
+        tab_media, text="ゲームを選択してください",
+        font=("Arial", 9), fg="#888", anchor="w",
+    )
+    media_header_label.pack(fill="x", padx=12, pady=(8, 4))
+    tk.Frame(tab_media, height=1, bg="#dddddd").pack(fill="x", padx=8)
+
+    # スクロール可能なメディアテーブル
+    _media_table_outer = tk.Frame(tab_media)
+    _media_table_outer.pack(fill="both", expand=True, padx=0, pady=(4, 0))
+
+    media_canvas = tk.Canvas(_media_table_outer, highlightthickness=0, bg="white")
+    _media_vsb = ttk.Scrollbar(_media_table_outer, orient="vertical", command=media_canvas.yview)
+    media_canvas.configure(yscrollcommand=_media_vsb.set)
+    _media_vsb.pack(side="right", fill="y")
+    media_canvas.pack(side="left", fill="both", expand=True)
+
+    media_scroll_frame = tk.Frame(media_canvas, bg="white")
+    _media_canvas_win = media_canvas.create_window((0, 0), window=media_scroll_frame, anchor="nw")
+
+    def _on_media_scroll_frame_configure(e=None) -> None:
+        media_canvas.configure(scrollregion=media_canvas.bbox("all"))
+
+    def _on_media_canvas_configure(e) -> None:
+        media_canvas.itemconfig(_media_canvas_win, width=e.width)
+
+    media_scroll_frame.bind("<Configure>", _on_media_scroll_frame_configure)
+    media_canvas.bind("<Configure>", _on_media_canvas_configure)
+
+    # マウスホイールスクロール（キャンバスにフォーカスがある間のみ）
+    def _on_media_mousewheel(e) -> None:
+        media_canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
+
+    media_canvas.bind("<Enter>", lambda e: media_canvas.bind_all("<MouseWheel>", _on_media_mousewheel))
+    media_canvas.bind("<Leave>", lambda e: media_canvas.unbind_all("<MouseWheel>"))
+
+    _media_img_refs: list = []  # PhotoImage のガベージコレクション防止
+
     # ── ロジック ─────────────────────────────────────────────
     state: dict = {"root_elem": None, "games": [], "decl": "", "selected": -1}
 
@@ -336,6 +580,86 @@ def build_ui(root: tk.Tk, config: dict) -> None:
         else:
             if el is not None:
                 game.remove(el)
+
+    def update_media_tab(game: ET.Element | None) -> None:
+        """メディアタブをサムネイル付きテーブルで更新する。"""
+        _media_img_refs.clear()
+        for w in media_scroll_frame.winfo_children():
+            w.destroy()
+
+        if game is None:
+            media_header_label.config(text="ゲームを選択してください", fg="#888", font=("Arial", 9))
+            return
+
+        title = get_field(game, "name") or get_field(game, "path") or "(不明)"
+        media_header_label.config(text=title, fg="black", font=("Arial", 9, "bold"))
+
+        path_val = get_field(game, "path")
+        if not path_val:
+            return
+
+        stem       = get_rom_stem(path_val)
+        media_path = resolve_paths(config, system_var.get())["media_path"]
+        file_map   = find_media_files(media_path, stem)
+
+        for row_i, folder in enumerate(MEDIA_FOLDERS):
+            file_path = file_map[folder]
+            bg = "white" if row_i % 2 == 0 else "#f5f5f5"
+
+            row = tk.Frame(media_scroll_frame, bg=bg)
+            row.pack(fill="x")
+
+            # フォルダ名列
+            tk.Label(
+                row, text=folder, font=("Arial", 9), anchor="w",
+                width=14, bg=bg, fg="#444",
+            ).pack(side="left", padx=(10, 4), pady=6)
+
+            if file_path is None:
+                tk.Label(row, text="-", font=("Arial", 10, "bold"), fg="#cc0000", bg=bg).pack(
+                    side="left", padx=4, pady=6,
+                )
+                continue
+
+            suffix = file_path.suffix.lower()
+
+            if suffix in IMAGE_SUFFIXES and _PIL_OK:
+                # 画像サムネイル（クリックでフルサイズ表示）
+                try:
+                    img = Image.open(file_path)
+                    img.thumbnail((THUMB_W, THUMB_H), Image.LANCZOS)
+                    photo = ImageTk.PhotoImage(img)
+                    _media_img_refs.append(photo)
+                    lbl_img = tk.Label(row, image=photo, bg=bg, cursor="hand2")
+                    lbl_img.pack(side="left", padx=(4, 8), pady=4)
+                    lbl_img.bind(
+                        "<Button-1>",
+                        lambda e, fp=file_path, fn=folder: open_fullsize_image(row, fp, fn),
+                    )
+                except Exception:
+                    tk.Label(row, text="(読込失敗)", font=("Arial", 8), fg="#888", bg=bg).pack(
+                        side="left", padx=4, pady=6,
+                    )
+            elif suffix in IMAGE_SUFFIXES:
+                # PIL未使用時は○のみ
+                tk.Label(row, text="○ (画像)", font=("Arial", 9), fg="#007700", bg=bg).pack(
+                    side="left", padx=4, pady=6,
+                )
+            elif suffix in VIDEO_SUFFIXES:
+                lbl_v = tk.Label(row, text="[動画] ▶", font=("Arial", 9), fg="#007700", bg=bg, cursor="hand2")
+                lbl_v.pack(side="left", padx=4, pady=6)
+                lbl_v.bind("<Button-1>", lambda e, fp=file_path: open_with_default_app(fp))
+            elif suffix == ".pdf":
+                lbl_p = tk.Label(row, text="[PDF] ▶", font=("Arial", 9), fg="#0055cc", bg=bg, cursor="hand2")
+                lbl_p.pack(side="left", padx=4, pady=6)
+                lbl_p.bind("<Button-1>", lambda e, fp=file_path: open_with_default_app(fp))
+            else:
+                tk.Label(row, text="○", font=("Arial", 10, "bold"), fg="#007700", bg=bg).pack(
+                    side="left", padx=4, pady=6,
+                )
+
+
+        _on_media_scroll_frame_configure()
 
     def fill_form(game: ET.Element) -> None:
         path_label.config(text=get_field(game, "path"))
@@ -357,6 +681,7 @@ def build_ui(root: tk.Tk, config: dict) -> None:
             else:
                 widget.delete(0, "end")
                 widget.insert(0, val)
+        update_media_tab(game)
 
     def flush_form(idx: int) -> None:
         if idx < 0 or idx >= len(state["games"]):
@@ -495,6 +820,8 @@ def build_ui(root: tk.Tk, config: dict) -> None:
                 widget.set_date_str("")
             else:
                 widget.delete(0, "end")
+        update_media_tab(None)
+        btn_media_check.config(state="normal")
 
     def save_file() -> None:
         if state["root_elem"] is None:
@@ -511,6 +838,9 @@ def build_ui(root: tk.Tk, config: dict) -> None:
 
     btn_load_file.config(command=load_file)
     btn_save_file.config(command=save_file)
+    btn_media_check.config(
+        command=lambda: open_media_check_window(root, config, system_var.get(), state["games"])
+    )
     load_file()
 
 

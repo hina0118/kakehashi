@@ -5,4 +5,5 @@ description = "ES-DE 日本語メタデータ管理ツール"
 requires-python = ">=3.10"
 dependencies = [
     "tkcalendar>=1.6.1",
+    "pillow>=10.0.0",
 ]

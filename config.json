@@ -4,9 +4,9 @@
   "systems": ["ps2", "ps1", "psp", "ds", "gba", "gbc", "gb", "snes", "nes", "megadrive"],
   "backup_max": 5,
   "windows": {
-    "rom_base": "C:/Users/YourName/Desktop/test_emu/roms",
+    "rom_base": "C:/app/project/kakehashi/work/roms",
     "gamelist_base": "C:/app/project/kakehashi/work/gamelists",
-    "media_base": "C:/Users/YourName/.emulationstation/downloaded_media"
+    "media_base": "C:/app/project/kakehashi/work/downloaded_media"
   },
   "steam_deck": {
     "rom_base": "/run/media/mmcblk0p1/Emulation/roms",
