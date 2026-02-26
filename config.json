@@ -2,9 +2,10 @@
   "environment": "windows",
   "system": "ps2",
   "systems": ["ps2", "ps1", "psp", "ds", "gba", "gbc", "gb", "snes", "nes", "megadrive"],
+  "backup_max": 5,
   "windows": {
     "rom_base": "C:/Users/YourName/Desktop/test_emu/roms",
-    "gamelist_base": "C:/Users/YourName/.emulationstation/gamelists",
+    "gamelist_base": "C:/app/project/kakehashi/work/gamelists",
     "media_base": "C:/Users/YourName/.emulationstation/downloaded_media"
   },
   "steam_deck": {
