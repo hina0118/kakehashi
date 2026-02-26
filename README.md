@@ -31,15 +31,16 @@ EmulationStation Desktop Edition (ES-DE) において、標準のスクレイパ
 
 4. XMLデータ構造の定義 (ES-DE準拠)
 各ゲームエントリは以下のタグを必須・推奨項目とする。
+
 | タグ名 | 内容 | 備考 |
 |---|---|---|
-| | ./filename.m3u | ROMの相対パス |
-| | 日本語タイトル | 表示名 |
-| | ゲームのあらすじ | 日本語テキスト |
-| | ./downloaded_media/ps2/covers/filename.png | 画像へのパス |
-| | YYYYMMDDT000000 | 発売日フォーマット |
-| | 開発会社名 | |
-| | ジャンル | |
+| path | ./filename.m3u | ROMの相対パス |
+| name | 日本語タイトル | 表示名 |
+| desc | ゲームのあらすじ | 日本語テキスト |
+| image | ./downloaded_media/ps2/covers/filename.png | 画像へのパス |
+| releasedate | YYYYMMDDT000000 | 発売日フォーマット |
+| developer | 開発会社名 | |
+| genre | ジャンル | |
 
 5. 開発環境・技術スタック (推奨)
 * 言語: Python 3.x
@@ -60,6 +61,7 @@ Windows版のES-DEをインストールするか、あるいは単にデスク�
 
 8. WindowsとSteam Deckの「パス」の違い
 ツールを完成させたあと、Steam Deckへ持っていくことを想定して、設定ファイルなどでパスを切り替えられるようにしておくとスマートです。
+
 | 項目 | Windowsでの標準的な場所 | Steam Deck (Linux) での場所 |
 |---|---|---|
 | gamelist.xml | %HOMEPATH%\.emulationstation\gamelists\ | ~/.emulationstation/gamelists/ |
