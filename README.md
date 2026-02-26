@@ -67,3 +67,51 @@ Windows版のES-DEをインストールするか、あるいは単にデスク�
 | gamelist.xml | %HOMEPATH%\.emulationstation\gamelists\ | ~/.emulationstation/gamelists/ |
 | メディアフォルダ | %HOMEPATH%\.emulationstation\downloaded_media\ | ~/.emulationstation/downloaded_media/ |
 | ROMフォルダ | （任意の設定場所） | /run/media/mmcblk0p1/Emulation/roms/ (SDカード) |
+
+# 🚀 Steam Deck (SteamOS) での実行方法
+Steam Deckのデスクトップモードで以下の手順を実行してください。
+
+1. リポジトリのクローン
+ターミナル（Konsole）を開き、プロジェクトをダウンロードします。
+
+```Bash
+cd ~/Desktop
+git clone https://github.com/hina0118/kakehashi.git
+cd kakehashi
+```
+
+2. セットアップ
+SteamOSのシステム環境を汚さないよう、Pythonの仮想環境を使用してセットアップします。
+
+```Bash
+# 仮想環境を作成
+python -m venv venv
+
+# 仮想環境を有効化
+source venv/bin/activate
+
+# 必要なライブラリをインストール
+# ※lxmlなどを使用している場合
+pip install -r requirements.txt
+```
+
+3. 設定ファイルの編集
+config.json を開き、environment を "steam_deck" に変更するか、パスが正しいか確認してください。
+
+gamelist.xml の標準的な場所: /home/deck/.emulationstation/gamelists/ps2/gamelist.xml
+
+ROMフォルダの場所（SDカードの場合）: /run/media/mmcblk0p1/Emulation/roms/ps2/
+
+4. 実行
+```Bash
+python main.py
+```
+
+🛠️ トラブルシューティング
+パスが見つからない場合
+Steam Deckでは、SDカードのパスが個体によって異なる場合があります。
+ターミナルで ls /run/media/ を実行し、自分の環境のSDカード名（mmcblk0p1 など）を確認してください。
+
+ES-DEへの反映
+gamelist.xml を更新した後は、ES-DEを再起動するか、ES-DEのメニューから 「MAIN MENU」>「UI SETTINGS」>「RELOAD ALL MIXED IMAGES」 を実行してください。
+※ES-DEが起動中にスクリプトを実行すると、ES-DE終了時にデータが上書きされる可能性があるため、ES-DEを閉じてからの実行を推奨します。
