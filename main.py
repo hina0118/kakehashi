@@ -1,6 +1,7 @@
 import json
 import re
 import shutil
+import platform
 import urllib.parse
 import webbrowser
 import tkinter as tk
@@ -127,8 +128,15 @@ def save_window_state(root: tk.Tk) -> None:
         json.dump({"geometry": root.geometry()}, f, indent=2)
 
 
+def detect_environment(config: dict) -> str:
+    """config.json の environment を優先し、未設定の場合は OS を自動判別する。"""
+    if env := config.get("environment"):
+        return env
+    return "windows" if platform.system() == "Windows" else "steam_deck"
+
+
 def resolve_paths(config: dict, system: str) -> dict:
-    env = config.get("environment", "windows")
+    env = detect_environment(config)
     base = config.get(env, {})
     return {
         "rom_path":      f"{base.get('rom_base', '')}/{system}",
@@ -196,7 +204,7 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     combo.pack(side="right", padx=(4, 8), pady=5)
     tk.Label(topbar, text="対象機種:", font=("Arial", 9), bg="#f5f5f5").pack(side="right", pady=5)
 
-    env = config.get("environment", "unknown")
+    env = detect_environment(config)
     tk.Label(topbar, text=f"環境: {env}", font=("Arial", 9), fg="#666", bg="#f5f5f5").pack(side="right", padx=(12, 4), pady=5)
 
     tk.Frame(root, height=1, bg="#cccccc").pack(fill="x")
