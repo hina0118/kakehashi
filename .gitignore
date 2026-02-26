@@ -212,3 +212,6 @@ work/
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Serena AI assistant context
+.serena/

@@ -5,11 +5,14 @@ import shutil
 import subprocess
 import platform
 import urllib.parse
+import urllib.request
+import urllib.error
+import mimetypes
 import webbrowser
 import tkinter as tk
 import xml.etree.ElementTree as ET
 from datetime import date, datetime
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from pathlib import Path
 
 from tkcalendar import DateEntry
@@ -295,6 +298,263 @@ def open_fullsize_image(parent: tk.Widget, file_path: Path, folder_name: str) ->
     lbl.bind("<Button-1>", lambda e: win.destroy())
     win.bind("<Escape>",   lambda e: win.destroy())
     win.focus_set()
+
+
+def open_url_download_dialog(
+    parent: tk.Widget,
+    folder: str,
+    stem: str,
+    media_path: str,
+    game_title: str,
+    on_success: "callable[[], None]",
+) -> None:
+    """URLからメディアファイルをダウンロードして登録するダイアログを開く。"""
+    dest_dir = Path(media_path) / folder
+
+    dlg = tk.Toplevel(parent)
+    dlg.title(f"{folder} — URLからDL登録")
+    dlg.geometry("520x200")
+    dlg.resizable(True, False)
+    dlg.grab_set()
+
+    tk.Label(dlg, text=f"  {folder}  にダウンロード登録", font=("Arial", 10, "bold"), anchor="w").pack(
+        fill="x", padx=12, pady=(10, 0)
+    )
+    tk.Label(dlg, text=f"  {game_title}", font=("Arial", 9), fg="#555", anchor="w").pack(
+        fill="x", padx=12, pady=(2, 6)
+    )
+    tk.Frame(dlg, height=1, bg="#cccccc").pack(fill="x")
+
+    body = tk.Frame(dlg)
+    body.pack(fill="both", expand=True, padx=12, pady=8)
+    body.columnconfigure(1, weight=1)
+
+    tk.Label(body, text="URL:", font=("Arial", 9), anchor="w").grid(
+        row=0, column=0, sticky="w", pady=(2, 2)
+    )
+    url_var = tk.StringVar()
+    url_entry = tk.Entry(body, textvariable=url_var, font=("Arial", 9))
+    url_entry.grid(row=0, column=1, sticky="ew", padx=(6, 0), pady=(2, 2))
+
+    tk.Label(body, text="保存先:", font=("Arial", 9), anchor="w").grid(
+        row=1, column=0, sticky="nw", pady=(4, 2)
+    )
+    dest_label = tk.Label(
+        body, text="", font=("Arial", 8), fg="#555",
+        anchor="w", wraplength=360, justify="left",
+    )
+    dest_label.grid(row=1, column=1, sticky="ew", padx=(6, 0), pady=(4, 2))
+
+    def _update_dest(*_) -> None:
+        url = url_var.get().strip()
+        if not url:
+            dest_label.config(text="", fg="#555")
+            return
+        path_ext = Path(urllib.parse.urlparse(url).path).suffix.lower()
+        if path_ext:
+            dest_label.config(text=str(dest_dir / f"{stem}{path_ext}"), fg="#555")
+        else:
+            dest_label.config(
+                text="(拡張子をURLから判定できません。DL時にContent-Typeで判定します)",
+                fg="#888",
+            )
+
+    url_var.trace_add("write", _update_dest)
+
+    tk.Frame(dlg, height=1, bg="#cccccc").pack(fill="x")
+    footer = tk.Frame(dlg, bg="#f5f5f5")
+    footer.pack(fill="x", pady=6)
+
+    def do_download() -> None:
+        url = url_var.get().strip()
+        if not url:
+            messagebox.showwarning("URL未入力", "URLを入力してください。", parent=dlg)
+            return
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                content_type = resp.headers.get("Content-Type", "").split(";")[0].strip()
+                path_ext = Path(urllib.parse.urlparse(url).path).suffix.lower()
+                if path_ext in IMAGE_SUFFIXES | VIDEO_SUFFIXES | {".pdf"}:
+                    ext = path_ext
+                else:
+                    ext = mimetypes.guess_extension(content_type) or ""
+                    if ext in (".jpe", ".jpeg"):
+                        ext = ".jpg"
+                if not ext:
+                    messagebox.showwarning(
+                        "拡張子不明",
+                        "ファイル形式を判定できませんでした。\nURLを確認してください。",
+                        parent=dlg,
+                    )
+                    return
+                dest = dest_dir / f"{stem}{ext}"
+                data = resp.read()
+        except urllib.error.URLError as e:
+            messagebox.showerror("ダウンロードエラー", str(e.reason), parent=dlg)
+            return
+        except Exception as e:
+            messagebox.showerror("エラー", str(e), parent=dlg)
+            return
+
+        if not messagebox.askokcancel(
+            "登録確認",
+            f"保存先:\n{dest}\n\n登録しますか？",
+            parent=dlg,
+        ):
+            return
+        try:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(data)
+        except Exception as e:
+            messagebox.showerror("保存エラー", str(e), parent=dlg)
+            return
+
+        dlg.destroy()
+        on_success()
+
+    tk.Button(
+        footer, text="ダウンロード & 登録", font=("Arial", 9), width=16, command=do_download,
+    ).pack(side="left", padx=(12, 6))
+    tk.Button(
+        footer, text="閉じる", font=("Arial", 9), width=8, command=dlg.destroy,
+    ).pack(side="right", padx=12)
+
+    url_entry.focus_set()
+
+
+def open_cover_crop_dialog(
+    parent: tk.Widget,
+    cover_path: Path,
+    stem: str,
+    media_path: str,
+    game_title: str,
+    on_success: "callable[[], None]",
+) -> None:
+    """covers画像からロゴ領域をドラッグ選択で切り出し、marqueesに保存するダイアログ。PILが必要。"""
+    if not _PIL_OK:
+        messagebox.showwarning(
+            "Pillow未インストール",
+            "この機能にはPillowが必要です。\npip install pillow を実行してください。",
+            parent=parent,
+        )
+        return
+
+    try:
+        orig_img = Image.open(cover_path).convert("RGBA")
+    except Exception as e:
+        messagebox.showerror("画像読み込みエラー", str(e), parent=parent)
+        return
+
+    orig_w, orig_h = orig_img.size
+
+    # 表示用スケーリング（最大 600×600 に収める）
+    MAX_DISP = 600
+    scale = min(MAX_DISP / orig_w, MAX_DISP / orig_h, 1.0)
+    disp_w = max(1, int(orig_w * scale))
+    disp_h = max(1, int(orig_h * scale))
+    disp_img = orig_img.resize((disp_w, disp_h), Image.LANCZOS) if scale < 1.0 else orig_img.copy()
+
+    dlg = tk.Toplevel(parent)
+    dlg.title("covers → marquees 切り出し")
+    dlg.resizable(False, False)
+    dlg.grab_set()
+
+    tk.Label(dlg, text="  covers → marquees  切り出し", font=("Arial", 10, "bold"), anchor="w").pack(
+        fill="x", padx=12, pady=(10, 0)
+    )
+    tk.Label(dlg, text=f"  {game_title}", font=("Arial", 9), fg="#555", anchor="w").pack(
+        fill="x", padx=12, pady=(2, 2)
+    )
+    tk.Label(
+        dlg, text="  ドラッグして切り出し範囲を指定してください", font=("Arial", 8), fg="#888", anchor="w",
+    ).pack(fill="x", padx=12, pady=(0, 6))
+    tk.Frame(dlg, height=1, bg="#cccccc").pack(fill="x")
+
+    photo = ImageTk.PhotoImage(disp_img)
+    canvas = tk.Canvas(dlg, width=disp_w, height=disp_h, cursor="crosshair", highlightthickness=0)
+    canvas.pack(padx=8, pady=8)
+    canvas.create_image(0, 0, anchor="nw", image=photo)
+    canvas._photo_ref = photo  # GC防止
+
+    rect_id = [None]
+    sel = {"x1": 0, "y1": 0, "x2": 0, "y2": 0}
+
+    def _clamp(v: int, lo: int, hi: int) -> int:
+        return max(lo, min(hi, v))
+
+    def on_press(e: tk.Event) -> None:
+        sel["x1"] = sel["x2"] = _clamp(e.x, 0, disp_w)
+        sel["y1"] = sel["y2"] = _clamp(e.y, 0, disp_h)
+        if rect_id[0]:
+            canvas.delete(rect_id[0])
+        rect_id[0] = canvas.create_rectangle(
+            sel["x1"], sel["y1"], sel["x2"], sel["y2"],
+            outline="#ff3333", width=2, dash=(4, 2),
+        )
+
+    def on_drag(e: tk.Event) -> None:
+        sel["x2"] = _clamp(e.x, 0, disp_w)
+        sel["y2"] = _clamp(e.y, 0, disp_h)
+        canvas.coords(rect_id[0], sel["x1"], sel["y1"], sel["x2"], sel["y2"])
+
+    def on_release(e: tk.Event) -> None:
+        sel["x2"] = _clamp(e.x, 0, disp_w)
+        sel["y2"] = _clamp(e.y, 0, disp_h)
+        canvas.coords(rect_id[0], sel["x1"], sel["y1"], sel["x2"], sel["y2"])
+
+    canvas.bind("<ButtonPress-1>", on_press)
+    canvas.bind("<B1-Motion>", on_drag)
+    canvas.bind("<ButtonRelease-1>", on_release)
+
+    tk.Frame(dlg, height=1, bg="#cccccc").pack(fill="x")
+    footer = tk.Frame(dlg, bg="#f5f5f5")
+    footer.pack(fill="x", pady=6)
+
+    def do_crop() -> None:
+        x1 = min(sel["x1"], sel["x2"])
+        y1 = min(sel["y1"], sel["y2"])
+        x2 = max(sel["x1"], sel["x2"])
+        y2 = max(sel["y1"], sel["y2"])
+
+        if x2 - x1 < 5 or y2 - y1 < 5:
+            messagebox.showwarning(
+                "選択範囲が小さすぎます",
+                "もう少し広い範囲をドラッグして選択してください。",
+                parent=dlg,
+            )
+            return
+
+        # 表示座標 → 元画像座標に変換
+        ox1 = int(x1 / scale)
+        oy1 = int(y1 / scale)
+        ox2 = int(x2 / scale)
+        oy2 = int(y2 / scale)
+
+        dest = Path(media_path) / "marquees" / f"{stem}.png"
+        if not messagebox.askokcancel(
+            "登録確認",
+            f"保存先:\n{dest}\n\n登録しますか？",
+            parent=dlg,
+        ):
+            return
+        try:
+            cropped = orig_img.crop((ox1, oy1, ox2, oy2))
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            cropped.save(dest, "PNG")
+        except Exception as e:
+            messagebox.showerror("保存エラー", str(e), parent=dlg)
+            return
+
+        dlg.destroy()
+        on_success()
+
+    tk.Button(
+        footer, text="切り出して登録", font=("Arial", 9), width=14, command=do_crop,
+    ).pack(side="left", padx=(12, 6))
+    tk.Button(
+        footer, text="閉じる", font=("Arial", 9), width=8, command=dlg.destroy,
+    ).pack(side="right", padx=12)
 
 
 def open_media_check_window(parent: tk.Tk, config: dict, system: str, games: list[ET.Element]) -> None:
@@ -602,6 +862,38 @@ def build_ui(root: tk.Tk, config: dict) -> None:
         media_path = resolve_paths(config, system_var.get())["media_path"]
         file_map   = find_media_files(media_path, stem)
 
+        def _do_file_select(f: str) -> None:
+            filetypes = [
+                ("画像ファイル", " ".join(f"*{s}" for s in sorted(IMAGE_SUFFIXES))),
+                ("動画ファイル", " ".join(f"*{s}" for s in sorted(VIDEO_SUFFIXES))),
+                ("PDFファイル", "*.pdf"),
+                ("すべてのファイル", "*.*"),
+            ]
+            src = filedialog.askopenfilename(title=f"{f} — ファイル選択", filetypes=filetypes)
+            if not src:
+                return
+            src_path = Path(src)
+            dest = Path(media_path) / f / f"{stem}{src_path.suffix.lower()}"
+            if not messagebox.askokcancel("登録確認", f"保存先:\n{dest}\n\n登録しますか？"):
+                return
+            try:
+                (Path(media_path) / f).mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_path, dest)
+            except Exception as e:
+                messagebox.showerror("コピーエラー", str(e))
+                return
+            update_media_tab(game)
+
+        def _do_delete(fp: Path) -> None:
+            if not messagebox.askokcancel("削除確認", f"削除しますか？\n{fp}"):
+                return
+            try:
+                fp.unlink()
+            except Exception as e:
+                messagebox.showerror("削除エラー", str(e))
+                return
+            update_media_tab(game)
+
         for row_i, folder in enumerate(MEDIA_FOLDERS):
             file_path = file_map[folder]
             bg = "white" if row_i % 2 == 0 else "#f5f5f5"
@@ -619,7 +911,41 @@ def build_ui(root: tk.Tk, config: dict) -> None:
                 tk.Label(row, text="-", font=("Arial", 10, "bold"), fg="#cc0000", bg=bg).pack(
                     side="left", padx=4, pady=6,
                 )
+                btn_f = tk.Frame(row, bg=bg)
+                btn_f.pack(side="left", padx=(4, 0))
+                tk.Button(
+                    btn_f, text="URLからDL", font=("Arial", 8),
+                    command=lambda f=folder: open_url_download_dialog(
+                        media_scroll_frame, f, stem, media_path, title,
+                        lambda: update_media_tab(game)
+                    ),
+                ).pack(side="left", padx=2)
+                tk.Button(
+                    btn_f, text="ファイル選択...", font=("Arial", 8),
+                    command=lambda f=folder: _do_file_select(f),
+                ).pack(side="left", padx=2)
+                tk.Button(
+                    btn_f, text="検索", font=("Arial", 8),
+                    command=lambda f=folder: webbrowser.open(
+                        "https://www.google.com/search?tbm=isch&q="
+                        + urllib.parse.quote(f"{title} {f}")
+                    ),
+                ).pack(side="left", padx=2)
+                if folder == "marquees" and file_map.get("covers") is not None:
+                    tk.Button(
+                        btn_f, text="coverから切り出し", font=("Arial", 8),
+                        command=lambda: open_cover_crop_dialog(
+                            media_scroll_frame, file_map["covers"],
+                            stem, media_path, title,
+                            lambda: update_media_tab(game),
+                        ),
+                    ).pack(side="left", padx=2)
                 continue
+
+            tk.Button(
+                row, text="削除", font=("Arial", 8), fg="#cc0000",
+                command=lambda fp=file_path: _do_delete(fp),
+            ).pack(side="right", padx=(4, 8))
 
             suffix = file_path.suffix.lower()
 
