@@ -145,8 +145,16 @@ def pull_files(
     sftp = cl.open_sftp()
     on_log("  接続OK\n")
 
-    # ディレクトリ指定分を再帰列挙してfile_tasksに追加
-    tasks: list[tuple[str, Path]] = list(file_tasks)
+    # 単一ファイル指定分：リモートに存在するものだけ追加
+    tasks: list[tuple[str, Path]] = []
+    for rp, lp in file_tasks:
+        try:
+            sftp.stat(rp)
+            tasks.append((rp, lp))
+        except FileNotFoundError:
+            on_log(f"  [スキップ] リモートに存在しません: {rp.rsplit('/', 1)[-1]}")
+
+    # ディレクトリ指定分を再帰列挙して追加
     for remote_dir, local_dir in dir_mappings:
         _collect_remote_files(sftp, remote_dir, local_dir, tasks)
 
