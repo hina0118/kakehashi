@@ -266,6 +266,19 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     path_label.grid(row=0, column=1, sticky="ew", pady=(4, 2), padx=(4, 0))
     tk.Frame(form, height=1, bg="#eeeeee").grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 6))
 
+    # 削除バナー（ROMが存在しない場合のみ表示）
+    del_banner = tk.Frame(form, bg="#fff0f0")
+    del_banner.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+    del_banner.grid_remove()
+    tk.Label(del_banner, text="⚠ ROMファイルが見つかりません",
+             font=("Arial", 9), fg="#cc0000", bg="#fff0f0").pack(side="left", padx=(6, 8), pady=4)
+    btn_delete_entry = tk.Button(
+        del_banner, text="エントリを削除", font=("Arial", 9),
+        fg="white", bg="#cc0000", activebackground="#aa0000",
+        relief="flat", padx=8, pady=2, cursor="hand2",
+    )
+    btn_delete_entry.pack(side="right", padx=6, pady=3)
+
     # フィールド定義: (key, 表示名, widget種別)
     fields: list[tuple[str, str, str]] = [
         ("name",        "タイトル", "entry"),
@@ -278,7 +291,7 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     field_widgets: dict[str, tk.Widget] = {}
 
     for r, (key, label_ja, wtype) in enumerate(fields):
-        grid_row = r + 2
+        grid_row = r + 3
         tk.Label(form, text=f"{label_ja}:", font=("Arial", 9, "bold"), anchor="nw").grid(
             row=grid_row, column=0, sticky="nw", pady=(2, 2)
         )
@@ -321,6 +334,12 @@ def build_ui(root: tk.Tk, config: dict) -> None:
 
     def fill_form(game: ET.Element) -> None:
         path_label.config(text=get_field(game, "path"))
+        rom_base = resolve_paths(config, system_var.get())["rom_path"]
+        path_val = get_field(game, "path")
+        if path_val and not (Path(rom_base) / path_val).exists():
+            del_banner.grid()
+        else:
+            del_banner.grid_remove()
         for key, widget in field_widgets.items():
             val = get_field(game, key)
             if isinstance(widget, TagInput):
@@ -368,6 +387,32 @@ def build_ui(root: tk.Tk, config: dict) -> None:
         fill_form(state["games"][idx])
 
     listbox.bind("<<ListboxSelect>>", on_select)
+
+    def delete_entry() -> None:
+        idx = state["selected"]
+        if idx < 0 or idx >= len(state["games"]):
+            return
+        if not messagebox.askyesno("エントリ削除", "このゲームのエントリを削除しますか？\n\n保存するまでファイルには反映されません。"):
+            return
+        gamelist = state["root_elem"].find("gameList")
+        if gamelist is not None:
+            gamelist.remove(state["games"][idx])
+        state["games"].pop(idx)
+        listbox.delete(idx)
+        state["selected"] = -1
+        del_banner.grid_remove()
+        path_label.config(text="")
+        for widget in field_widgets.values():
+            if isinstance(widget, tk.Text):
+                widget.delete("1.0", "end")
+            elif isinstance(widget, TagInput):
+                widget.set_tags([])
+            elif isinstance(widget, DateInput):
+                widget.set_date_str("")
+            else:
+                widget.delete(0, "end")
+
+    btn_delete_entry.config(command=delete_entry)
 
     # ── 検索バー ────────────────────────────────────────────
     tk.Label(search_bar_frame, text="Web検索:", font=("Arial", 9, "bold"), bg="#f5f5f5").pack(
