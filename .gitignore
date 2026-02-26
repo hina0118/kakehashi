@@ -207,6 +207,7 @@ marimo/_lsp/
 __marimo__/
 
 # kakehashi runtime
+config.json
 window_state.json
 work/
 

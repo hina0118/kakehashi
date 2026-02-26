@@ -1,0 +1,33 @@
+{
+  "environment": "windows",
+  "system": "ps2",
+  "systems": [
+    "ps2",
+    "ps1",
+    "psp",
+    "ds",
+    "gba",
+    "gbc",
+    "gb",
+    "snes",
+    "nes",
+    "megadrive"
+  ],
+  "backup_max": 5,
+  "windows": {
+    "rom_base": "C:/path/to/roms",
+    "gamelist_base": "C:/path/to/gamelists",
+    "media_base": "C:/path/to/downloaded_media"
+  },
+  "steam_deck": {
+    "rom_base": "/run/media/deck/SDCARD/Emulation/roms",
+    "gamelist_base": "/home/deck/ES-DE/gamelists",
+    "media_base": "/run/media/deck/SDCARD/Emulation/tools/downloaded_media"
+  },
+  "sync": {
+    "host": "192.168.x.x",
+    "port": 22,
+    "username": "deck",
+    "password": ""
+  }
+}
