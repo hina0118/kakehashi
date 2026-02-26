@@ -1,0 +1,15 @@
+{
+  "environment": "windows",
+  "system": "ps2",
+  "systems": ["ps2", "ps1", "psp", "ds", "gba", "gbc", "gb", "snes", "nes", "megadrive"],
+  "windows": {
+    "rom_base": "C:/Users/YourName/Desktop/test_emu/roms",
+    "gamelist_base": "C:/Users/YourName/.emulationstation/gamelists",
+    "media_base": "C:/Users/YourName/.emulationstation/downloaded_media"
+  },
+  "steam_deck": {
+    "rom_base": "/run/media/mmcblk0p1/Emulation/roms",
+    "gamelist_base": "/home/deck/.emulationstation/gamelists",
+    "media_base": "/home/deck/.emulationstation/downloaded_media"
+  }
+}
