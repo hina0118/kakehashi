@@ -209,3 +209,6 @@ __marimo__/
 # kakehashi runtime
 window_state.json
 work/
+
+# Claude Code local settings
+.claude/settings.local.json
