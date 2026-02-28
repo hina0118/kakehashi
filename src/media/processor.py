@@ -22,6 +22,7 @@ from src.core.config_manager import (
     resolve_paths,
 )
 from src.media.logo_extractor import is_available as _ai_logo_available
+from src.media.miximage import generate_miximage, CANVAS_W, CANVAS_H
 
 
 def get_rom_stem(path_val: str) -> str:
@@ -411,6 +412,133 @@ def open_cover_crop_dialog(
     tk.Button(
         footer, text="手動切り出し登録", font=("Arial", 9), width=14, command=do_crop,
     ).pack(side="left", padx=(4, 6))
+    tk.Button(
+        footer, text="閉じる", font=("Arial", 9), width=8, command=dlg.destroy,
+    ).pack(side="right", padx=12)
+
+
+def open_miximage_dialog(
+    parent: tk.Widget,
+    stem: str,
+    media_path: str,
+    game_title: str,
+    on_success: "callable[[], None]",
+) -> None:
+    """各メディア素材から miximage を生成・プレビューして保存するダイアログ。"""
+    if not _PIL_OK:
+        messagebox.showwarning(
+            "Pillow未インストール",
+            "この機能にはPillowが必要です。\npip install pillow を実行してください。",
+            parent=parent,
+        )
+        return
+
+    file_map = find_media_files(media_path, stem)
+    ss_path = file_map.get("screenshots")
+    if ss_path is None:
+        messagebox.showwarning(
+            "素材不足",
+            "miximage の生成には screenshots が必要です。\n先に screenshots を登録してください。",
+            parent=parent,
+        )
+        return
+
+    dlg = tk.Toplevel(parent)
+    dlg.title("miximage 生成")
+    dlg.resizable(False, False)
+    dlg.grab_set()
+
+    tk.Label(dlg, text="  miximage 生成", font=("Arial", 10, "bold"), anchor="w").pack(
+        fill="x", padx=12, pady=(10, 0)
+    )
+    tk.Label(dlg, text=f"  {game_title}", font=("Arial", 9), fg="#555", anchor="w").pack(
+        fill="x", padx=12, pady=(2, 2)
+    )
+
+    info_parts = []
+    for folder in ("screenshots", "marquees", "3dboxes", "physicalmedia"):
+        status = "○" if file_map.get(folder) else "-"
+        info_parts.append(f"{folder}: {status}")
+    tk.Label(
+        dlg, text="  素材: " + "  |  ".join(info_parts),
+        font=("Arial", 8), fg="#666", anchor="w",
+    ).pack(fill="x", padx=12, pady=(0, 6))
+    tk.Frame(dlg, height=1, bg="#cccccc").pack(fill="x")
+
+    PREVIEW_MAX = 520
+    preview_canvas = tk.Canvas(
+        dlg, width=PREVIEW_MAX, height=int(PREVIEW_MAX * CANVAS_H / CANVAS_W),
+        bg="#d0d0d0", highlightthickness=1, highlightbackground="#cccccc",
+    )
+    preview_canvas.pack(padx=12, pady=8)
+    preview_canvas._photo_ref = None
+
+    def _draw_checker(canvas, w, h, size=12):
+        for y in range(0, h, size):
+            for x in range(0, w, size):
+                fill = "#ffffff" if (x // size + y // size) % 2 == 0 else "#cccccc"
+                canvas.create_rectangle(x, y, x + size, y + size, fill=fill, outline="")
+
+    generated_img_holder: list = [None]
+
+    def update_preview():
+        try:
+            img = generate_miximage(
+                screenshot_path=ss_path,
+                marquee_path=file_map.get("marquees"),
+                box3d_path=file_map.get("3dboxes"),
+                physicalmedia_path=file_map.get("physicalmedia"),
+            )
+            generated_img_holder[0] = img
+
+            pw, ph = img.size
+            canvas_h = int(PREVIEW_MAX * CANVAS_H / CANVAS_W)
+            scale = min(PREVIEW_MAX / pw, canvas_h / ph, 1.0)
+            dw = max(1, int(pw * scale))
+            dh = max(1, int(ph * scale))
+            disp = img.resize((dw, dh), Image.LANCZOS) if scale < 1.0 else img.copy()
+            photo = ImageTk.PhotoImage(disp)
+
+            preview_canvas.delete("all")
+            _draw_checker(preview_canvas, PREVIEW_MAX, canvas_h)
+            preview_canvas.create_image(
+                PREVIEW_MAX // 2, canvas_h // 2, anchor="center", image=photo,
+            )
+            preview_canvas._photo_ref = photo
+        except Exception as e:
+            canvas_h = int(PREVIEW_MAX * CANVAS_H / CANVAS_W)
+            preview_canvas.delete("all")
+            preview_canvas.create_text(
+                PREVIEW_MAX // 2, canvas_h // 2,
+                text=f"(生成エラー: {e})", fill="#cc0000", font=("Arial", 10),
+            )
+
+    dlg.after(100, update_preview)
+
+    tk.Frame(dlg, height=1, bg="#cccccc").pack(fill="x")
+    footer = tk.Frame(dlg, bg="#f5f5f5")
+    footer.pack(fill="x", pady=6)
+
+    def do_save():
+        img = generated_img_holder[0]
+        if img is None:
+            messagebox.showwarning("未生成", "プレビューを確認してから保存してください。", parent=dlg)
+            return
+        dest = Path(media_path) / "miximages" / f"{stem}.png"
+        if not messagebox.askokcancel("登録確認", f"保存先:\n{dest}\n\n登録しますか？", parent=dlg):
+            return
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            img.save(dest, "PNG")
+        except Exception as e:
+            messagebox.showerror("保存エラー", str(e), parent=dlg)
+            return
+        dlg.destroy()
+        on_success()
+
+    tk.Button(
+        footer, text="保存", font=("Arial", 9), width=14, command=do_save,
+    ).pack(side="left", padx=(12, 6))
     tk.Button(
         footer, text="閉じる", font=("Arial", 9), width=8, command=dlg.destroy,
     ).pack(side="right", padx=12)
