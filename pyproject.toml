@@ -7,4 +7,5 @@ dependencies = [
     "tkcalendar>=1.6.1",
     "pillow>=10.0.0",
     "paramiko>=3.0.0",
+    "numpy>=1.24.0",
 ]

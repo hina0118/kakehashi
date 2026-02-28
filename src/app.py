@@ -22,8 +22,10 @@ from src.core.sync_manager import _PARAMIKO_OK, test_connection, transfer_files,
 from src.media.processor import (
     get_rom_stem, find_media_files,
     open_with_default_app, open_fullsize_image,
-    open_url_download_dialog, open_cover_crop_dialog, open_media_check_window,
+    open_url_download_dialog, open_cover_crop_dialog,
+    open_media_check_window,
 )
+from src.media.box3d import open_3dbox_dialog
 from src.widgets.custom_inputs import DateInput, TagInput
 
 
@@ -656,6 +658,15 @@ def build_ui(root: tk.Tk, config: dict) -> None:
                         command=lambda: open_cover_crop_dialog(
                             media_scroll_frame, file_map["covers"],
                             stem, media_path, title,
+                            lambda: update_media_tab(game),
+                        ),
+                    ).pack(side="left", padx=2)
+                if folder == "3dboxes" and file_map.get("covers") is not None:
+                    tk.Button(
+                        btn_f, text="coverから3Dbox生成", font=("Arial", 8),
+                        command=lambda: open_3dbox_dialog(
+                            media_scroll_frame, file_map["covers"],
+                            stem, media_path, title, system_var.get(),
                             lambda: update_media_tab(game),
                         ),
                     ).pack(side="left", padx=2)
