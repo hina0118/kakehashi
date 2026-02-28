@@ -21,6 +21,7 @@ from src.core.config_manager import (
     MEDIA_FOLDERS, IMAGE_SUFFIXES, VIDEO_SUFFIXES, THUMB_W, THUMB_H,
     resolve_paths,
 )
+from src.media.logo_extractor import is_available as _ai_logo_available
 
 
 def get_rom_stem(path_val: str) -> str:
@@ -263,9 +264,10 @@ def open_cover_crop_dialog(
     tk.Label(dlg, text=f"  {game_title}", font=("Arial", 9), fg="#555", anchor="w").pack(
         fill="x", padx=12, pady=(2, 2)
     )
-    tk.Label(
+    hint_label = tk.Label(
         dlg, text="  ドラッグして切り出し範囲を指定してください", font=("Arial", 8), fg="#888", anchor="w",
-    ).pack(fill="x", padx=12, pady=(0, 6))
+    )
+    hint_label.pack(fill="x", padx=12, pady=(0, 6))
     tk.Frame(dlg, height=1, bg="#cccccc").pack(fill="x")
 
     photo = ImageTk.PhotoImage(disp_img)
@@ -279,6 +281,19 @@ def open_cover_crop_dialog(
 
     def _clamp(v: int, lo: int, hi: int) -> int:
         return max(lo, min(hi, v))
+
+    def _set_selection(dx1: int, dy1: int, dx2: int, dy2: int) -> None:
+        """表示座標で選択矩形をセットする。"""
+        sel["x1"] = _clamp(dx1, 0, disp_w)
+        sel["y1"] = _clamp(dy1, 0, disp_h)
+        sel["x2"] = _clamp(dx2, 0, disp_w)
+        sel["y2"] = _clamp(dy2, 0, disp_h)
+        if rect_id[0]:
+            canvas.delete(rect_id[0])
+        rect_id[0] = canvas.create_rectangle(
+            sel["x1"], sel["y1"], sel["x2"], sel["y2"],
+            outline="#00cc44", width=2, dash=(4, 2),
+        )
 
     def on_press(e: tk.Event) -> None:
         sel["x1"] = sel["x2"] = _clamp(e.x, 0, disp_w)
@@ -304,9 +319,65 @@ def open_cover_crop_dialog(
     canvas.bind("<B1-Motion>", on_drag)
     canvas.bind("<ButtonRelease-1>", on_release)
 
+    # ── AI検出 ─────────────────────────────────────────────────
+    ai_result = {"logo_img": None}  # AI抽出済みの透過ロゴ画像を保持
+
+    def do_ai_detect() -> None:
+        hint_label.config(text="  AI検出中... (初回はモデルロードに時間がかかります)", fg="#cc6600")
+        dlg.update_idletasks()
+        try:
+            from src.media.logo_extractor import extract_logo
+            logo_img = extract_logo(orig_img, transparent=True)
+        except Exception as e:
+            hint_label.config(text=f"  AI検出エラー: {e}", fg="#cc0000")
+            return
+
+        if logo_img is None:
+            hint_label.config(text="  ロゴを検出できませんでした。手動で範囲を指定してください。", fg="#cc0000")
+            return
+
+        ai_result["logo_img"] = logo_img
+
+        from src.media.logo_extractor import detect_logo
+        detections = detect_logo(orig_img)
+        if detections:
+            best = detections[0]
+            _set_selection(
+                int(best.x1 * scale), int(best.y1 * scale),
+                int(best.x2 * scale), int(best.y2 * scale),
+            )
+
+        hint_label.config(
+            text="  AI検出+背景除去完了 — 「AI結果を登録」で透過ロゴとして保存できます。",
+            fg="#006600",
+        )
+
     tk.Frame(dlg, height=1, bg="#cccccc").pack(fill="x")
     footer = tk.Frame(dlg, bg="#f5f5f5")
     footer.pack(fill="x", pady=6)
+
+    def _save_and_close(image_to_save: Image.Image) -> None:
+        dest = Path(media_path) / "marquees" / f"{stem}.png"
+        if not messagebox.askokcancel(
+            "登録確認",
+            f"保存先:\n{dest}\n\n登録しますか？",
+            parent=dlg,
+        ):
+            return
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            image_to_save.save(dest, "PNG")
+        except Exception as e:
+            messagebox.showerror("保存エラー", str(e), parent=dlg)
+            return
+        dlg.destroy()
+        on_success()
+
+    def do_save_ai() -> None:
+        if ai_result["logo_img"] is None:
+            messagebox.showinfo("未検出", "先に「AI検出」を実行してください。", parent=dlg)
+            return
+        _save_and_close(ai_result["logo_img"])
 
     def do_crop() -> None:
         x1 = min(sel["x1"], sel["x2"])
@@ -322,33 +393,24 @@ def open_cover_crop_dialog(
             )
             return
 
-        # 表示座標 → 元画像座標に変換
         ox1 = int(x1 / scale)
         oy1 = int(y1 / scale)
         ox2 = int(x2 / scale)
         oy2 = int(y2 / scale)
+        _save_and_close(orig_img.crop((ox1, oy1, ox2, oy2)))
 
-        dest = Path(media_path) / "marquees" / f"{stem}.png"
-        if not messagebox.askokcancel(
-            "登録確認",
-            f"保存先:\n{dest}\n\n登録しますか？",
-            parent=dlg,
-        ):
-            return
-        try:
-            cropped = orig_img.crop((ox1, oy1, ox2, oy2))
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            cropped.save(dest, "PNG")
-        except Exception as e:
-            messagebox.showerror("保存エラー", str(e), parent=dlg)
-            return
-
-        dlg.destroy()
-        on_success()
-
+    if _ai_logo_available():
+        tk.Button(
+            footer, text="AI検出", font=("Arial", 9, "bold"), width=10,
+            command=do_ai_detect, bg="#e8f5e9", activebackground="#c8e6c9",
+        ).pack(side="left", padx=(12, 4))
+        tk.Button(
+            footer, text="AI結果を登録", font=("Arial", 9), width=14,
+            command=do_save_ai, bg="#e3f2fd", activebackground="#bbdefb",
+        ).pack(side="left", padx=(4, 4))
     tk.Button(
-        footer, text="切り出して登録", font=("Arial", 9), width=14, command=do_crop,
-    ).pack(side="left", padx=(12, 6))
+        footer, text="手動切り出し登録", font=("Arial", 9), width=14, command=do_crop,
+    ).pack(side="left", padx=(4, 6))
     tk.Button(
         footer, text="閉じる", font=("Arial", 9), width=8, command=dlg.destroy,
     ).pack(side="right", padx=12)
