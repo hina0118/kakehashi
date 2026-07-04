@@ -45,6 +45,18 @@ SSH/SFTPを使ってWindowsで編集したデータをSteam Deckへ転送しま�
 `gamelist_base` 配下のフォルダ名を自動スキャンして機種一覧を生成します。
 フォルダが見つからない場合は `config.json` の `systems` リストにフォールバックします。
 
+### メディアタブ
+ゲームごとのメディアファイル（`3dboxes` / `backcovers` / `covers` / `fanart` / `manuals` /
+`marquees` / `miximages` / `physicalmedia` / `screenshots` / `titlescreens` / `videos` の11種）の
+存在確認・閲覧・生成を行います。
+
+* **存在チェック**: 各フォルダに ROM名 と一致するファイルがあるか一覧表示し、サムネイル・フルサイズ表示に対応
+* **3Dボックス画像生成**（`covers` → `3dboxes`）: カバー画像を射影変換でカバー正面＋背表紙に変形し、影を合成してプレビュー付きダイアログで生成
+  * 背表紙幅・奥行き・シャドウ有無・背表紙テキストをその場で調整可能
+  * PS2/PS3/PS4/PSP/PS Vita/PSX は公式パッケージ風テンプレート画像を合成した専用スタイルを適用（アセットが無い場合はテキスト描画にフォールバック）
+* **AIロゴ抽出**（`covers` → `marquees`）: Florence-2 でロゴ領域を検出し、BiRefNet で背景除去した透過PNGを生成（要NVIDIA CUDA GPU、初回ロード時に約2.5GB VRAM使用）
+* **miximage合成**（`screenshots`+`marquees`+`3dboxes`+`physicalmedia` → `miximages`）: 1280×960の透過PNGに、背景（角丸+ドロップシャドウ付きスクリーンショット）・右上（マーキー）・左下（3Dボックス、物理メディアがあれば並べて配置）を合成
+
 ---
 
 ## 3. ターゲットファイルとディレクトリ構造
@@ -81,8 +93,10 @@ SSH/SFTPを使ってWindowsで編集したデータをSteam Deckへ転送しま�
 * **GUIフレームワーク**: tkinter（標準ライブラリ）
 * **外部ライブラリ**:
   * `tkcalendar` — カレンダー形式の日付入力
-  * `Pillow` — 画像サムネイル・フルサイズ表示、画像クロップ
+  * `Pillow` — 画像サムネイル・フルサイズ表示、画像クロップ・合成（3Dボックス/miximage生成）
   * `paramiko` — SSH/SFTP経由のPC間ファイル転送
+  * `numpy` — 射影変換の係数計算、アルファチャンネルからのbbox算出
+  * `transformers` / `einops` / `timm` / `accelerate` / `kornia`（任意、`pip install -e .[ai]`）— AIロゴ抽出（Florence-2 + BiRefNet、NVIDIA CUDA GPU必須）
 * **パッケージ管理**: uv（推奨）または pip
 * **プラットフォーム**: Windows 11 / SteamOS (Linux)
 
