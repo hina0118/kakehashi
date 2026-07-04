@@ -48,6 +48,11 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     btn_media_check.pack(side="right", padx=(4, 8), pady=5)
     btn_sync = tk.Button(topbar, text="同期", font=("Arial", 9))
     btn_sync.pack(side="right", padx=(4, 0), pady=5)
+    btn_push = tk.Button(
+        topbar, text="プッシュ", font=("Arial", 9, "bold"),
+        bg="#0066cc", fg="white", activebackground="#0055aa", relief="flat",
+    )
+    btn_push.pack(side="right", padx=(4, 0), pady=5)
 
     systems = discover_systems(config)
     current_system = config.get("system", systems[0] if systems else "")
@@ -57,12 +62,33 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     combo.bind("<<ComboboxSelected>>", lambda e: load_file())
     tk.Label(topbar, text="対象機種:", font=("Arial", 9), bg="#f5f5f5").pack(side="right", pady=5)
 
-    # SSH接続設定（「同期」ウィンドウとload_file()の両方が参照するため共有する）
+    # SSH接続設定・プッシュ設定（「同期」ウィンドウ・load_file()・プッシュ処理のいずれからも参照するため共有する）
     _sync_cfg = config.get("sync", {})
     sync_host_var = tk.StringVar(value=_sync_cfg.get("host", ""))
     sync_port_var = tk.StringVar(value=str(_sync_cfg.get("port", 22)))
     sync_user_var = tk.StringVar(value=_sync_cfg.get("username", "deck"))
     sync_pass_var = tk.StringVar(value=_sync_cfg.get("password", ""))
+
+    _default_media_on = {"covers", "screenshots", "videos"}
+    sync_media_type_vars: dict[str, tk.BooleanVar] = {
+        folder: tk.BooleanVar(value=folder in _default_media_on) for folder in MEDIA_FOLDERS
+    }
+    sync_overwrite_var = tk.BooleanVar(value=False)
+
+    # ── ステータス行（メディア自動プル状況・gamelist未同期件数） ──────
+    statusbar = tk.Frame(root, bg="#f5f5f5")
+    statusbar.pack(fill="x")
+    media_status_label = tk.Label(statusbar, text="", font=("Arial", 8), fg="#888888", bg="#f5f5f5", anchor="w")
+    media_status_label.pack(side="left", padx=(12, 4), pady=(0, 4))
+    gl_status_label = tk.Label(statusbar, text="", font=("Arial", 8), fg="#888888", bg="#f5f5f5", anchor="e")
+    gl_status_label.pack(side="right", padx=(4, 12), pady=(0, 4))
+
+    def _refresh_gl_status() -> None:
+        n = len(state["dirty"]) + len(state["deleted_paths"])
+        if n > 0:
+            gl_status_label.config(text=f"gamelist.xml: 未同期の変更 {n}件", fg="#cc6600")
+        else:
+            gl_status_label.config(text="gamelist.xml: 変更なし", fg="#888888")
 
     tk.Frame(root, height=1, bg="#cccccc").pack(fill="x")
 
@@ -285,46 +311,23 @@ def build_ui(root: tk.Tk, config: dict) -> None:
 
         tk.Frame(content, height=1, bg="#eeeeee").pack(fill="x", pady=(12, 8))
 
-        # ── 転送内容 ─────────────────────────────────────────
-        tk.Label(content, text="転送内容", font=("Arial", 9, "bold"), anchor="w").pack(fill="x")
-
-        gl_row = tk.Frame(content)
-        gl_row.pack(fill="x", pady=(6, 4))
-        tk.Label(gl_row, text="gamelist.xml", font=("Arial", 9)).pack(side="left")
-        gl_status_label = tk.Label(gl_row, font=("Arial", 9))
-        gl_status_label.pack(side="left", padx=(10, 0))
-
-        def _refresh_gl_status() -> None:
-            n = len(state["dirty"]) + len(state["deleted_paths"])
-            if n > 0:
-                gl_status_label.config(text=f"未同期の変更: {n}件", fg="#cc6600")
-            else:
-                gl_status_label.config(text="変更なし", fg="#888888")
-
-        _refresh_gl_status()
-
-        tk.Frame(content, height=1, bg="#f2f2f2").pack(fill="x", pady=(6, 6))
+        # ── 対象メディアフォルダ（プッシュ時） ──────────────────
+        tk.Label(content, text="対象メディアフォルダ（プッシュ時）", font=("Arial", 9, "bold"), anchor="w").pack(fill="x")
 
         media_row = tk.Frame(content)
-        media_row.pack(fill="x")
-        sync_media_chk_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(media_row, text="メディア", variable=sync_media_chk_var, font=("Arial", 9)).pack(side="left")
-
+        media_row.pack(fill="x", pady=(6, 0))
         media_select_all_btn = tk.Button(media_row, text="すべて選択", font=("Arial", 8))
         media_select_none_btn = tk.Button(media_row, text="すべて解除", font=("Arial", 8))
         media_select_none_btn.pack(side="right")
         media_select_all_btn.pack(side="right", padx=(0, 6))
 
-        # メディアタイプ チェックボックス群
+        # メディアタイプ チェックボックス群（sync_media_type_varsはbuild_ui()冒頭で定義済み）
         _mt_frame = tk.Frame(content)
-        _mt_frame.pack(fill="x", pady=(4, 0), padx=(20, 0))
-        _default_on = {"covers", "screenshots", "videos"}
-        sync_media_type_vars: dict[str, tk.BooleanVar] = {}
+        _mt_frame.pack(fill="x", pady=(4, 0))
         for _mi, _mf in enumerate(MEDIA_FOLDERS):
-            _mv = tk.BooleanVar(value=_mf in _default_on)
-            _mcb = tk.Checkbutton(_mt_frame, text=_mf, variable=_mv, font=("Arial", 9))
-            _mcb.grid(row=_mi // 4, column=_mi % 4, sticky="w", padx=(0, 20), pady=2)
-            sync_media_type_vars[_mf] = _mv
+            tk.Checkbutton(
+                _mt_frame, text=_mf, variable=sync_media_type_vars[_mf], font=("Arial", 9),
+            ).grid(row=_mi // 4, column=_mi % 4, sticky="w", padx=(0, 20), pady=2)
 
         def _set_all_media(value: bool) -> None:
             for _v in sync_media_type_vars.values():
@@ -333,19 +336,9 @@ def build_ui(root: tk.Tk, config: dict) -> None:
         media_select_all_btn.config(command=lambda: _set_all_media(True))
         media_select_none_btn.config(command=lambda: _set_all_media(False))
 
-        def _toggle_media_cbs(*_) -> None:
-            _st = "normal" if sync_media_chk_var.get() else "disabled"
-            for _w in _mt_frame.winfo_children():
-                _w.config(state=_st)
-            media_select_all_btn.config(state=_st)
-            media_select_none_btn.config(state=_st)
-
-        sync_media_chk_var.trace_add("write", _toggle_media_cbs)
-
         overwrite_row = tk.Frame(content)
-        overwrite_row.pack(fill="x", padx=(20, 0), pady=(8, 0))
+        overwrite_row.pack(fill="x", pady=(8, 0))
         tk.Label(overwrite_row, text="既存ファイル:", font=("Arial", 9), anchor="w").pack(side="left")
-        sync_overwrite_var = tk.BooleanVar(value=False)
         tk.Radiobutton(
             overwrite_row, text="スキップ（差分のみ転送）",
             variable=sync_overwrite_var, value=False, font=("Arial", 9),
@@ -354,220 +347,6 @@ def build_ui(root: tk.Tk, config: dict) -> None:
             overwrite_row, text="上書き",
             variable=sync_overwrite_var, value=True, font=("Arial", 9),
         ).pack(side="left", padx=(16, 0))
-
-        tk.Frame(content, height=1, bg="#eeeeee").pack(fill="x", pady=(12, 8))
-
-        # ── 実行コントロール ────────────────────────────────────
-        _ctrl = tk.Frame(content)
-        _ctrl.pack(fill="x")
-
-        sync_progress = ttk.Progressbar(_ctrl, mode="determinate", length=200)
-        sync_progress.pack(side="left", fill="x", expand=True, padx=(0, 8))
-
-        btn_sync_run = tk.Button(
-            _ctrl, text="→ プッシュ", font=("Arial", 9, "bold"),
-            bg="#0066cc", fg="white", activebackground="#0055aa",
-            relief="flat", padx=14, pady=3,
-        )
-        btn_sync_run.pack(side="right")
-
-        btn_pull_run = tk.Button(
-            _ctrl, text="← メディアをプル", font=("Arial", 9, "bold"),
-            bg="#4a8f3f", fg="white", activebackground="#3a7030",
-            relief="flat", padx=14, pady=3,
-        )
-        btn_pull_run.pack(side="right", padx=(0, 6))
-
-        # ── ログ ────────────────────────────────────────────
-        tk.Label(content, text="ログ", font=("Arial", 9, "bold"), anchor="w").pack(fill="x", pady=(12, 0))
-        tk.Frame(content, height=1, bg="#eeeeee").pack(fill="x", pady=(4, 6))
-
-        log_frame = tk.Frame(content)
-        log_frame.pack(fill="both", expand=True)
-        _log_sb = tk.Scrollbar(log_frame)
-        _log_sb.pack(side="right", fill="y")
-        sync_log = tk.Text(
-            log_frame, font=("Courier", 8),
-            yscrollcommand=_log_sb.set, state="disabled", wrap="none",
-        )
-        sync_log.pack(fill="both", expand=True)
-        _log_sb.config(command=sync_log.yview)
-
-        def _log(msg: str) -> None:
-            sync_log.config(state="normal")
-            sync_log.insert("end", msg + "\n")
-            sync_log.see("end")
-            sync_log.config(state="disabled")
-
-        def _clear_log() -> None:
-            sync_log.config(state="normal")
-            sync_log.delete("1.0", "end")
-            sync_log.config(state="disabled")
-
-        def _run_sync() -> None:
-            host = sync_host_var.get().strip()
-            if not host:
-                messagebox.showwarning("設定エラー", "ホスト（Steam DeckのIPアドレス）を入力してください。")
-                return
-
-            flush_form(state["selected"])  # 現在編集中の内容を確定してから同期する
-
-            btn_sync_run.config(state="disabled", text="転送中...")
-            _clear_log()
-            sync_progress["value"] = 0
-
-            system       = system_var.get()
-            local_paths  = resolve_paths(config, system)
-            sd_cfg       = config.get("steam_deck", {})
-            remote_media_base = sd_cfg.get("media_base", "/home/deck/.emulationstation/downloaded_media")
-
-            # 転送タスクリスト: (local_path, remote_path)　※gamelist.xmlは差分マージで別途処理
-            tasks: list[tuple[Path, str]] = []
-
-            if sync_media_chk_var.get():
-                local_media_sys = Path(local_paths["media_path"])
-                for folder, fvar in sync_media_type_vars.items():
-                    if not fvar.get():
-                        continue
-                    local_folder = local_media_sys / folder
-                    if not local_folder.is_dir():
-                        continue
-                    for _f in sorted(local_folder.iterdir()):
-                        if _f.is_file():
-                            tasks.append((_f, f"{remote_media_base}/{system}/{folder}/{_f.name}"))
-
-            overwrite = sync_overwrite_var.get()
-            remote_gl = resolve_remote_gamelist_path(config, system)
-
-            def _transfer() -> None:
-                try:
-                    if state["dirty"] or state["deleted_paths"]:
-                        applied, deleted = push_gamelist_diff(
-                            host=host,
-                            port=int(sync_port_var.get() or 22),
-                            username=sync_user_var.get(),
-                            password=sync_pass_var.get(),
-                            remote_path=remote_gl,
-                            diffs=state["dirty"],
-                            deleted_paths=state["deleted_paths"],
-                            backup_max=config.get("backup_max", 5),
-                            on_log=_log,
-                        )
-                        state["dirty"].clear()
-                        state["deleted_paths"].clear()
-                        win.after(0, _refresh_gl_status)
-                    else:
-                        _log("  [スキップ] gamelist.xmlの変更がありません")
-
-                    ok, skipped, errors = transfer_files(
-                        host=host,
-                        port=int(sync_port_var.get() or 22),
-                        username=sync_user_var.get(),
-                        password=sync_pass_var.get(),
-                        tasks=tasks,
-                        overwrite=overwrite,
-                        on_log=_log,
-                        on_progress=lambda v: win.after(
-                            0, lambda _v=v: sync_progress.__setitem__("value", _v)
-                        ),
-                    )
-                    summary = f"\n[完了] 転送: {ok} / スキップ: {skipped} / エラー: {errors}"
-                    _log(summary)
-
-                    if errors == 0:
-                        win.after(0, lambda: messagebox.showinfo(
-                            "転送完了",
-                            f"転送が完了しました。\n転送: {ok} ファイル / スキップ: {skipped} ファイル",
-                        ))
-                    else:
-                        win.after(0, lambda: messagebox.showwarning(
-                            "転送完了（一部エラーあり）",
-                            f"転送は完了しましたが一部エラーがあります。\n転送: {ok} / スキップ: {skipped} / エラー: {errors}",
-                        ))
-
-                except Exception as _ex:
-                    _log(f"\n[エラー] {_ex}")
-                    win.after(0, lambda _m=str(_ex): messagebox.showerror("転送エラー", _m))
-                finally:
-                    win.after(0, lambda: btn_sync_run.config(state="normal", text="転送実行"))
-
-            threading.Thread(target=_transfer, daemon=True).start()
-
-        def _run_pull() -> None:
-            if not sync_media_chk_var.get():
-                messagebox.showwarning("設定エラー", "メディアの種類を1つ以上選択してください。")
-                return
-            host = sync_host_var.get().strip()
-            if not host:
-                messagebox.showwarning("設定エラー", "ホスト（Steam DeckのIPアドレス）を入力してください。")
-                return
-
-            btn_pull_run.config(state="disabled", text="プル中...")
-            btn_sync_run.config(state="disabled")
-            _clear_log()
-            sync_progress["value"] = 0
-
-            system      = system_var.get()
-            local_paths = resolve_paths(config, system)
-            sd_cfg      = config.get("steam_deck", {})
-            remote_media_base = sd_cfg.get("media_base", "/home/deck/.emulationstation/downloaded_media")
-
-            # 単一ファイル転送指示 (gamelist.xmlは編集時に都度リモート取得するためプル対象外)
-            file_tasks: list[tuple[str, Path]] = []
-
-            # ディレクトリ単位転送指示 (メディア)
-            dir_mappings: list[tuple[str, Path]] = []
-            if sync_media_chk_var.get():
-                local_media_sys = Path(local_paths["media_path"])
-                for folder, fvar in sync_media_type_vars.items():
-                    if not fvar.get():
-                        continue
-                    remote_folder = f"{remote_media_base}/{system}/{folder}"
-                    local_folder  = local_media_sys / folder
-                    dir_mappings.append((remote_folder, local_folder))
-
-            overwrite = sync_overwrite_var.get()
-
-            def _pull() -> None:
-                try:
-                    ok, skipped, errors = pull_files(
-                        host=host,
-                        port=int(sync_port_var.get() or 22),
-                        username=sync_user_var.get(),
-                        password=sync_pass_var.get(),
-                        file_tasks=file_tasks,
-                        dir_mappings=dir_mappings,
-                        overwrite=overwrite,
-                        on_log=_log,
-                        on_progress=lambda v: win.after(
-                            0, lambda _v=v: sync_progress.__setitem__("value", _v)
-                        ),
-                    )
-                    summary = f"\n[完了] 取得: {ok} / スキップ: {skipped} / エラー: {errors}"
-                    _log(summary)
-
-                    if errors == 0:
-                        win.after(0, lambda: messagebox.showinfo(
-                            "プル完了",
-                            f"プルが完了しました。\n取得: {ok} ファイル / スキップ: {skipped} ファイル",
-                        ))
-                    else:
-                        win.after(0, lambda: messagebox.showwarning(
-                            "プル完了（一部エラーあり）",
-                            f"プルは完了しましたが一部エラーがあります。\n取得: {ok} / スキップ: {skipped} / エラー: {errors}",
-                        ))
-
-                except Exception as _ex:
-                    _log(f"\n[エラー] {_ex}")
-                    win.after(0, lambda _m=str(_ex): messagebox.showerror("プルエラー", _m))
-                finally:
-                    win.after(0, lambda: btn_pull_run.config(state="normal", text="← メディアをプル"))
-                    win.after(0, lambda: btn_sync_run.config(state="normal"))
-
-            threading.Thread(target=_pull, daemon=True).start()
-
-        btn_sync_run.config(command=_run_sync)
-        btn_pull_run.config(command=_run_pull)
 
     btn_sync.config(command=open_sync_window)
 
@@ -778,6 +557,7 @@ def build_ui(root: tk.Tk, config: dict) -> None:
         display = get_field(game, "name") or get_field(game, "path") or "(不明)"
         listbox.delete(idx)
         listbox.insert(idx, display)
+        _refresh_gl_status()
 
     def on_select(event=None) -> None:
         sel = listbox.curselection()
@@ -839,6 +619,41 @@ def build_ui(root: tk.Tk, config: dict) -> None:
             command=lambda t=_tmpl: open_translate(t),
         ).pack(side="left", padx=(0, 4), pady=5)
 
+    def _auto_pull_media() -> None:
+        """起動時・機種切替時に、メディア全フォルダをバックグラウンドで自動プルする。"""
+        system = system_var.get()
+        local_paths = resolve_paths(config, system)
+        sd_cfg = config.get("steam_deck", {})
+        remote_media_base = sd_cfg.get("media_base", "/home/deck/.emulationstation/downloaded_media")
+        local_media_sys = Path(local_paths["media_path"])
+        dir_mappings = [
+            (f"{remote_media_base}/{system}/{folder}", local_media_sys / folder)
+            for folder in MEDIA_FOLDERS
+        ]
+        host = sync_host_var.get().strip()
+        port = int(sync_port_var.get() or 22)
+        username = sync_user_var.get()
+        password = sync_pass_var.get()
+
+        media_status_label.config(text="🔄 メディア取得中...", fg="#666666")
+
+        def _do() -> None:
+            try:
+                ok, skipped, errors = pull_files(
+                    host=host, port=port, username=username, password=password,
+                    file_tasks=[], dir_mappings=dir_mappings, overwrite=False,
+                    on_log=print, on_progress=lambda v: None,
+                )
+                if errors == 0:
+                    text, fg = f"✓ メディア取得済み（{ok}件 / スキップ{skipped}件）", "#009900"
+                else:
+                    text, fg = f"⚠ メディア取得エラー {errors}件", "#cc0000"
+            except Exception as ex:
+                text, fg = f"⚠ メディア取得失敗: {ex}", "#cc0000"
+            root.after(0, lambda: media_status_label.config(text=text, fg=fg))
+
+        threading.Thread(target=_do, daemon=True).start()
+
     def load_file() -> None:
         if not _PARAMIKO_OK:
             messagebox.showwarning(
@@ -891,8 +706,81 @@ def build_ui(root: tk.Tk, config: dict) -> None:
                 widget.delete(0, "end")
         update_media_tab(None)
         btn_media_check.config(state="normal")
+        _refresh_gl_status()
+        _auto_pull_media()
+
+    def _do_push() -> None:
+        if not _PARAMIKO_OK:
+            messagebox.showwarning(
+                "paramiko未インストール",
+                "プッシュにはSteam DeckへのSSH接続が必要です。\npip install paramiko を実行してください。",
+            )
+            return
+        host = sync_host_var.get().strip()
+        if not host:
+            messagebox.showwarning("設定エラー", "「同期」画面でホスト（Steam DeckのIPアドレス）を設定してください。")
+            return
+
+        flush_form(state["selected"])  # 現在編集中の内容を確定してからプッシュする
+
+        btn_push.config(state="disabled", text="プッシュ中...")
+
+        system = system_var.get()
+        local_paths = resolve_paths(config, system)
+        sd_cfg = config.get("steam_deck", {})
+        remote_media_base = sd_cfg.get("media_base", "/home/deck/.emulationstation/downloaded_media")
+        remote_gl = resolve_remote_gamelist_path(config, system)
+
+        tasks: list[tuple[Path, str]] = []
+        local_media_sys = Path(local_paths["media_path"])
+        for folder, fvar in sync_media_type_vars.items():
+            if not fvar.get():
+                continue
+            local_folder = local_media_sys / folder
+            if not local_folder.is_dir():
+                continue
+            for _f in sorted(local_folder.iterdir()):
+                if _f.is_file():
+                    tasks.append((_f, f"{remote_media_base}/{system}/{folder}/{_f.name}"))
+
+        overwrite = sync_overwrite_var.get()
+        port = int(sync_port_var.get() or 22)
+        username = sync_user_var.get()
+        password = sync_pass_var.get()
+
+        def _do() -> None:
+            gl_summary = ""
+            try:
+                if state["dirty"] or state["deleted_paths"]:
+                    applied, deleted = push_gamelist_diff(
+                        host=host, port=port, username=username, password=password,
+                        remote_path=remote_gl,
+                        diffs=state["dirty"], deleted_paths=state["deleted_paths"],
+                        backup_max=config.get("backup_max", 5), on_log=print,
+                    )
+                    state["dirty"].clear()
+                    state["deleted_paths"].clear()
+                    root.after(0, _refresh_gl_status)
+                    gl_summary = f"gamelist: 反映{applied}件 / 削除{deleted}件\n"
+
+                ok, skipped, errors = transfer_files(
+                    host=host, port=port, username=username, password=password,
+                    tasks=tasks, overwrite=overwrite, on_log=print, on_progress=lambda v: None,
+                )
+                summary = f"{gl_summary}メディア: 転送{ok} / スキップ{skipped} / エラー{errors}"
+                if errors == 0:
+                    root.after(0, lambda: messagebox.showinfo("プッシュ完了", summary))
+                else:
+                    root.after(0, lambda: messagebox.showwarning("プッシュ完了（一部エラーあり）", summary))
+            except Exception as ex:
+                root.after(0, lambda: messagebox.showerror("プッシュエラー", str(ex)))
+            finally:
+                root.after(0, lambda: btn_push.config(state="normal", text="プッシュ"))
+
+        threading.Thread(target=_do, daemon=True).start()
 
     btn_media_check.config(
         command=lambda: open_media_check_window(root, config, system_var.get(), state["games"])
     )
+    btn_push.config(command=_do_push)
     load_file()
