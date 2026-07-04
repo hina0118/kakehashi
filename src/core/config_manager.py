@@ -1,5 +1,4 @@
 import json
-import platform
 import tkinter as tk
 from pathlib import Path
 
@@ -38,19 +37,11 @@ def save_window_state(root: tk.Tk) -> None:
         json.dump({"geometry": root.geometry()}, f, indent=2)
 
 
-def detect_environment(config: dict) -> str:
-    """config.json の environment を優先し、未設定の場合は OS を自動判別する。"""
-    if env := config.get("environment"):
-        return env
-    return "windows" if platform.system() == "Windows" else "steam_deck"
-
-
 def discover_systems(config: dict) -> list[str]:
-    """gamelist_base 配下のフォルダ名からシステム一覧を取得する。
+    """ローカル(Windows)の rom_base 配下のフォルダ名からシステム一覧を取得する。
     フォルダが見つからない場合は config.json の systems にフォールバックする。
     """
-    env = detect_environment(config)
-    base = config.get(env, {}).get("gamelist_base", "")
+    base = config.get("windows", {}).get("rom_base", "")
     if base:
         p = Path(base)
         if p.is_dir():
@@ -61,10 +52,17 @@ def discover_systems(config: dict) -> list[str]:
 
 
 def resolve_paths(config: dict, system: str) -> dict:
-    env = detect_environment(config)
-    base = config.get(env, {})
+    """ローカル(Windows)側のROM・メディアパスを解決する。"""
+    base = config.get("windows", {})
     return {
-        "rom_path":      str(Path(base.get("rom_base",      "")) / system),
-        "gamelist_path": str(Path(base.get("gamelist_base", "")) / system / "gamelist.xml"),
-        "media_path":    str(Path(base.get("media_base",    "")) / system),
+        "rom_path":   str(Path(base.get("rom_base",   "")) / system),
+        "media_path": str(Path(base.get("media_base", "")) / system),
     }
+
+
+def resolve_remote_gamelist_path(config: dict, system: str) -> str:
+    """Steam Deck上のgamelist.xmlのリモートパスを組み立てる。"""
+    base = config.get("steam_deck", {}).get(
+        "gamelist_base", "/home/deck/.emulationstation/gamelists"
+    )
+    return f"{base}/{system}/gamelist.xml"

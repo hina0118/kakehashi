@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+from src.core.xml_handler import merge_gamelist_diff
+
 try:
     import paramiko
     _PARAMIKO_OK = True
@@ -97,6 +99,86 @@ def transfer_files(
     sftp.close()
     cl.close()
     return ok, skipped, errors
+
+
+def fetch_remote_text(host: str, port: int, username: str, password: str, remote_path: str) -> str:
+    """リモートファイルをテキストとして読み込む。"""
+    cl = paramiko.SSHClient()
+    cl.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    cl.connect(
+        hostname=host, port=port, username=username, password=password,
+        timeout=15, look_for_keys=False, allow_agent=False,
+    )
+    sftp = cl.open_sftp()
+    try:
+        with sftp.open(remote_path, "r") as f:
+            content = f.read().decode("utf-8")
+    finally:
+        sftp.close()
+        cl.close()
+    return content
+
+
+def _prune_remote_backups(sftp: "paramiko.SFTPClient", remote_dir: str, name: str, backup_max: int) -> None:
+    """リモートの世代バックアップのうち、backup_max を超える古いものを削除する。"""
+    backups = sorted(
+        entry.filename for entry in sftp.listdir_attr(remote_dir)
+        if entry.filename.startswith(f"{name}.") and entry.filename.endswith(".bak")
+    )
+    for old in backups[:-backup_max] if backup_max > 0 else backups:
+        try:
+            sftp.remove(f"{remote_dir}/{old}")
+        except Exception:
+            pass
+
+
+def push_gamelist_diff(
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    remote_path: str,
+    diffs: dict[str, dict[str, str]],
+    deleted_paths: set[str],
+    backup_max: int,
+    on_log: Callable[[str], None],
+) -> tuple[int, int]:
+    """リモートの最新gamelist.xmlを取得し、フィールド単位の差分だけをマージして書き戻す。
+
+    戻り値は (反映件数, 削除件数)。
+    """
+    on_log(f"[{datetime.now().strftime('%H:%M:%S')}] 接続中: {host} ...")
+    cl = paramiko.SSHClient()
+    cl.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    cl.connect(
+        hostname=host, port=port, username=username, password=password,
+        timeout=15, look_for_keys=False, allow_agent=False,
+    )
+    sftp = cl.open_sftp()
+    on_log("  接続OK\n")
+
+    try:
+        remote_dir, name = remote_path.rsplit("/", 1)
+
+        with sftp.open(remote_path, "r") as f:
+            content = f.read().decode("utf-8")
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        bak_path = f"{remote_dir}/{name}.{timestamp}.bak"
+        with sftp.open(bak_path, "w") as f:
+            f.write(content.encode("utf-8"))
+        _prune_remote_backups(sftp, remote_dir, name, backup_max)
+
+        merged, applied, deleted = merge_gamelist_diff(content, diffs, deleted_paths)
+
+        with sftp.open(remote_path, "w") as f:
+            f.write(merged.encode("utf-8"))
+
+        on_log(f"  ✓ gamelist.xml 反映: {applied} 件 / 削除: {deleted} 件")
+        return applied, deleted
+    finally:
+        sftp.close()
+        cl.close()
 
 
 def _collect_remote_files(

@@ -15,10 +15,15 @@ except ImportError:
 
 from src.core.config_manager import (
     CONFIG_PATH, MEDIA_FOLDERS, IMAGE_SUFFIXES, VIDEO_SUFFIXES, THUMB_W, THUMB_H,
-    detect_environment, discover_systems, resolve_paths,
+    discover_systems, resolve_paths, resolve_remote_gamelist_path,
 )
-from src.core.xml_handler import parse_gamelist, serialize_gamelist, save_gamelist_file
-from src.core.sync_manager import _PARAMIKO_OK, test_connection, transfer_files, pull_files
+from src.core.xml_handler import (
+    parse_gamelist_content, get_field, set_field,
+)
+from src.core.sync_manager import (
+    _PARAMIKO_OK, test_connection, transfer_files, pull_files,
+    fetch_remote_text, push_gamelist_diff,
+)
 from src.media.processor import (
     get_rom_stem, find_media_files,
     open_with_default_app, open_fullsize_image,
@@ -52,9 +57,6 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     combo = ttk.Combobox(topbar, textvariable=system_var, values=systems, state="readonly", width=10, font=("Arial", 9))
     combo.pack(side="right", padx=(4, 8), pady=5)
     tk.Label(topbar, text="対象機種:", font=("Arial", 9), bg="#f5f5f5").pack(side="right", pady=5)
-
-    env = detect_environment(config)
-    tk.Label(topbar, text=f"環境: {env}", font=("Arial", 9), fg="#666", bg="#f5f5f5").pack(side="right", padx=(12, 4), pady=5)
 
     tk.Frame(root, height=1, bg="#cccccc").pack(fill="x")
 
@@ -300,7 +302,7 @@ def build_ui(root: tk.Tk, config: dict) -> None:
         _x0.pack(fill="x", pady=2)
         tk.Label(_x0, text="転送内容:", font=("Arial", 9), width=12, anchor="w").pack(side="left")
         sync_gl_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(_x0, text="gamelist.xml", variable=sync_gl_var, font=("Arial", 9)).pack(side="left")
+        tk.Checkbutton(_x0, text="gamelist.xml（プッシュ時のみ）", variable=sync_gl_var, font=("Arial", 9)).pack(side="left")
         sync_media_chk_var = tk.BooleanVar(value=True)
         tk.Checkbutton(
             _x0, text="メディア", variable=sync_media_chk_var, font=("Arial", 9),
@@ -398,19 +400,10 @@ def build_ui(root: tk.Tk, config: dict) -> None:
             system       = system_var.get()
             local_paths  = resolve_paths(config, system)
             sd_cfg       = config.get("steam_deck", {})
-            remote_gl_base    = sd_cfg.get("gamelist_base", "/home/deck/.emulationstation/gamelists")
-            remote_media_base = sd_cfg.get("media_base",    "/home/deck/.emulationstation/downloaded_media")
+            remote_media_base = sd_cfg.get("media_base", "/home/deck/.emulationstation/downloaded_media")
 
-            # 転送タスクリスト: (local_path, remote_path)
+            # 転送タスクリスト: (local_path, remote_path)　※gamelist.xmlは差分マージで別途処理
             tasks: list[tuple[Path, str]] = []
-
-            if sync_gl_var.get():
-                gl_local  = Path(local_paths["gamelist_path"])
-                gl_remote = f"{remote_gl_base}/{system}/gamelist.xml"
-                if gl_local.exists():
-                    tasks.append((gl_local, gl_remote))
-                else:
-                    _log(f"  [スキップ] gamelist.xml が見つかりません: {gl_local}")
 
             if sync_media_chk_var.get():
                 local_media_sys = Path(local_paths["media_path"])
@@ -425,9 +418,29 @@ def build_ui(root: tk.Tk, config: dict) -> None:
                             tasks.append((_f, f"{remote_media_base}/{system}/{folder}/{_f.name}"))
 
             overwrite = sync_overwrite_var.get()
+            push_gamelist = sync_gl_var.get()
+            remote_gl = resolve_remote_gamelist_path(config, system)
 
             def _transfer() -> None:
                 try:
+                    if push_gamelist:
+                        if state["dirty"] or state["deleted_paths"]:
+                            applied, deleted = push_gamelist_diff(
+                                host=host,
+                                port=int(sync_port_var.get() or 22),
+                                username=sync_user_var.get(),
+                                password=sync_pass_var.get(),
+                                remote_path=remote_gl,
+                                diffs=state["dirty"],
+                                deleted_paths=state["deleted_paths"],
+                                backup_max=config.get("backup_max", 5),
+                                on_log=_log,
+                            )
+                            state["dirty"].clear()
+                            state["deleted_paths"].clear()
+                        else:
+                            _log("  [スキップ] gamelist.xmlの変更がありません")
+
                     ok, skipped, errors = transfer_files(
                         host=host,
                         port=int(sync_port_var.get() or 22),
@@ -463,8 +476,8 @@ def build_ui(root: tk.Tk, config: dict) -> None:
             threading.Thread(target=_transfer, daemon=True).start()
 
         def _run_pull() -> None:
-            if not sync_gl_var.get() and not sync_media_chk_var.get():
-                messagebox.showwarning("設定エラー", "転送内容を1つ以上選択してください。")
+            if not sync_media_chk_var.get():
+                messagebox.showwarning("設定エラー", "転送内容を1つ以上選択してください。\n（gamelist.xmlは編集時に都度リモート取得されるためプル不要です）")
                 return
             host = sync_host_var.get().strip()
             if not host:
@@ -479,15 +492,10 @@ def build_ui(root: tk.Tk, config: dict) -> None:
             system      = system_var.get()
             local_paths = resolve_paths(config, system)
             sd_cfg      = config.get("steam_deck", {})
-            remote_gl_base    = sd_cfg.get("gamelist_base", "/home/deck/.emulationstation/gamelists")
-            remote_media_base = sd_cfg.get("media_base",    "/home/deck/.emulationstation/downloaded_media")
+            remote_media_base = sd_cfg.get("media_base", "/home/deck/.emulationstation/downloaded_media")
 
-            # 単一ファイル転送指示 (gamelist.xml)
+            # 単一ファイル転送指示 (gamelist.xmlは編集時に都度リモート取得するためプル対象外)
             file_tasks: list[tuple[str, Path]] = []
-            if sync_gl_var.get():
-                remote_gl = f"{remote_gl_base}/{system}/gamelist.xml"
-                local_gl  = Path(local_paths["gamelist_path"])
-                file_tasks.append((remote_gl, local_gl))
 
             # ディレクトリ単位転送指示 (メディア)
             dir_mappings: list[tuple[str, Path]] = []
@@ -546,21 +554,10 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     _media_img_refs: list = []  # PhotoImage のガベージコレクション防止
 
     # ── ロジック ─────────────────────────────────────────────
-    state: dict = {"root_elem": None, "games": [], "decl": "", "selected": -1}
-
-    def get_field(game: ET.Element, key: str) -> str:
-        el = game.find(key)
-        return (el.text or "") if el is not None else ""
-
-    def set_field(game: ET.Element, key: str, value: str) -> None:
-        el = game.find(key)
-        if value:
-            if el is None:
-                el = ET.SubElement(game, key)
-            el.text = value
-        else:
-            if el is not None:
-                game.remove(el)
+    state: dict = {
+        "root_elem": None, "games": [], "decl": "", "selected": -1,
+        "dirty": {}, "deleted_paths": set(),
+    }
 
     def update_media_tab(game: ET.Element | None) -> None:
         """メディアタブをサムネイル付きテーブルで更新する。"""
@@ -751,6 +748,7 @@ def build_ui(root: tk.Tk, config: dict) -> None:
         if idx < 0 or idx >= len(state["games"]):
             return
         game = state["games"][idx]
+        path_val = get_field(game, "path")
         for key, widget in field_widgets.items():
             if isinstance(widget, TagInput):
                 val = ", ".join(widget.get_tags())
@@ -760,6 +758,8 @@ def build_ui(root: tk.Tk, config: dict) -> None:
                 val = widget.get("1.0", "end-1c").strip()
             else:
                 val = widget.get().strip()
+            if val != get_field(game, key) and path_val:
+                state["dirty"].setdefault(path_val, {})[key] = val
             set_field(game, key, val)
         display = get_field(game, "name") or get_field(game, "path") or "(不明)"
         listbox.delete(idx)
@@ -786,11 +786,16 @@ def build_ui(root: tk.Tk, config: dict) -> None:
         idx = state["selected"]
         if idx < 0 or idx >= len(state["games"]):
             return
-        if not messagebox.askyesno("エントリ削除", "このゲームのエントリを削除しますか？\n\n保存するまでファイルには反映されません。"):
+        if not messagebox.askyesno("エントリ削除", "このゲームのエントリを削除しますか？\n\n「同期」タブから転送するまでSteam Deck側には反映されません。"):
             return
+        game = state["games"][idx]
+        path_val = get_field(game, "path")
+        if path_val:
+            state["deleted_paths"].add(path_val)
+            state["dirty"].pop(path_val, None)
         gamelist = state["root_elem"].find("gameList")
         if gamelist is not None:
-            gamelist.remove(state["games"][idx])
+            gamelist.remove(game)
         state["games"].pop(idx)
         listbox.delete(idx)
         state["selected"] = -1
@@ -856,16 +861,41 @@ def build_ui(root: tk.Tk, config: dict) -> None:
         ).pack(side="left", padx=(0, 4), pady=5)
 
     def load_file() -> None:
-        path = resolve_paths(config, system_var.get())["gamelist_path"]
-        if not Path(path).exists():
-            messagebox.showwarning("読み込みエラー", f"ファイルが見つかりません:\n{path}")
+        if not _PARAMIKO_OK:
+            messagebox.showwarning(
+                "paramiko未インストール",
+                "gamelist.xmlの編集にはSteam DeckへのSSH接続が必要です。\n"
+                "pip install paramiko を実行してください。",
+            )
+            return
+        host = sync_host_var.get().strip()
+        if not host:
+            messagebox.showwarning(
+                "読み込みエラー",
+                "「同期」タブでSteam DeckのホストIPを設定してください。",
+            )
+            return
+        remote_path = resolve_remote_gamelist_path(config, system_var.get())
+        try:
+            content = fetch_remote_text(
+                host=host,
+                port=int(sync_port_var.get() or 22),
+                username=sync_user_var.get(),
+                password=sync_pass_var.get(),
+                remote_path=remote_path,
+            )
+        except Exception as e:
+            messagebox.showerror("読み込みエラー", f"Steam Deckから取得できませんでした:\n{e}")
             return
         try:
-            root_elem, games, decl = parse_gamelist(path)
+            root_elem, games, decl = parse_gamelist_content(content)
         except ET.ParseError as e:
             messagebox.showerror("XMLエラー", f"XMLのパースに失敗しました:\n{e}")
             return
-        state.update({"root_elem": root_elem, "games": games, "decl": decl, "selected": -1})
+        state.update({
+            "root_elem": root_elem, "games": games, "decl": decl, "selected": -1,
+            "dirty": {}, "deleted_paths": set(),
+        })
         listbox.delete(0, "end")
         rom_base = resolve_paths(config, system_var.get())["rom_path"]
         for i, game in enumerate(games):
@@ -892,13 +922,7 @@ def build_ui(root: tk.Tk, config: dict) -> None:
             messagebox.showwarning("保存エラー", "ファイルが読み込まれていません。")
             return
         flush_form(state["selected"])
-        path = resolve_paths(config, system_var.get())["gamelist_path"]
-        content = serialize_gamelist(state["root_elem"], state["decl"])
-        try:
-            save_gamelist_file(path, content, config.get("backup_max", 5))
-            messagebox.showinfo("保存完了", "保存しました。")
-        except Exception as e:
-            messagebox.showerror("保存エラー", str(e))
+        messagebox.showinfo("記録完了", "変更を記録しました。「同期」タブから転送してください。")
 
     btn_load_file.config(command=load_file)
     btn_save_file.config(command=save_file)
