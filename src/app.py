@@ -44,10 +44,6 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     tk.Label(topbar, text="kakehashi", font=("Arial", 12, "bold"), bg="#f5f5f5").pack(side="left", padx=(12, 4), pady=7)
     tk.Label(topbar, text="ES-DE 日本語メタデータ管理ツール", font=("Arial", 9), fg="gray", bg="#f5f5f5").pack(side="left", pady=7)
 
-    btn_save_file = tk.Button(topbar, text="保存", width=8, font=("Arial", 9))
-    btn_save_file.pack(side="right", padx=(4, 12), pady=5)
-    btn_load_file = tk.Button(topbar, text="読み込み", width=8, font=("Arial", 9))
-    btn_load_file.pack(side="right", pady=5)
     btn_media_check = tk.Button(topbar, text="メディアチェック", font=("Arial", 9), state="disabled")
     btn_media_check.pack(side="right", padx=(4, 8), pady=5)
 
@@ -56,6 +52,7 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     system_var = tk.StringVar(value=current_system)
     combo = ttk.Combobox(topbar, textvariable=system_var, values=systems, state="readonly", width=10, font=("Arial", 9))
     combo.pack(side="right", padx=(4, 8), pady=5)
+    combo.bind("<<ComboboxSelected>>", lambda e: load_file())
     tk.Label(topbar, text="対象機種:", font=("Arial", 9), bg="#f5f5f5").pack(side="right", pady=5)
 
     tk.Frame(root, height=1, bg="#cccccc").pack(fill="x")
@@ -379,6 +376,8 @@ def build_ui(root: tk.Tk, config: dict) -> None:
             if not host:
                 messagebox.showwarning("設定エラー", "ホスト（Steam DeckのIPアドレス）を入力してください。")
                 return
+
+            flush_form(state["selected"])  # 現在編集中の内容を確定してから同期する
 
             btn_sync_run.config(state="disabled", text="転送中...")
             _clear_log()
@@ -859,15 +858,6 @@ def build_ui(root: tk.Tk, config: dict) -> None:
         update_media_tab(None)
         btn_media_check.config(state="normal")
 
-    def save_file() -> None:
-        if state["root_elem"] is None:
-            messagebox.showwarning("保存エラー", "ファイルが読み込まれていません。")
-            return
-        flush_form(state["selected"])
-        messagebox.showinfo("記録完了", "変更を記録しました。「同期」タブから転送してください。")
-
-    btn_load_file.config(command=load_file)
-    btn_save_file.config(command=save_file)
     btn_media_check.config(
         command=lambda: open_media_check_window(root, config, system_var.get(), state["games"])
     )
