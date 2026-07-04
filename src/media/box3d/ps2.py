@@ -1,7 +1,12 @@
 """PS2 (DVDトールケース) 用の3Dボックス装飾。
 
-カバー正面の上下に黒帯、背表紙にプラットフォーム名(横書き回転)+タイトル(縦書き)を描画する。
+公式PS2パッケージテンプレート画像を合成して本物に近い外観を再現する。
+  カバー正面: assets/ps2_topbar.png をカバー幅に合わせてリサイズ・合成
+  背表紙    : assets/ps2_spine.png (PSロゴ+PlayStation.®2) をスパイン幅に合わせて合成
+              + ゲームタイトルを縦書き白文字でセンタリング
 """
+
+from pathlib import Path
 
 try:
     from PIL import Image, ImageDraw
@@ -9,14 +14,22 @@ try:
 except ImportError:
     _PIL_OK = False
 
+# アセットディレクトリ
+_ASSETS_DIR = Path(__file__).parent / "assets"
+
 PLATFORM_DISPLAY: dict[str, str] = {
-    "ps2": "PlayStation 2",
-    "ps3": "PlayStation 3",
-    "ps4": "PlayStation 4",
-    "psp": "PSP",
+    "ps2":    "PlayStation.®2",
+    "ps3":    "PlayStation.®3",
+    "ps4":    "PlayStation.®4",
+    "psp":    "PSP",
     "psvita": "PS Vita",
-    "psx": "PlayStation",
+    "psx":    "PlayStation",
 }
+
+# フォールバック用カラー定数（アセット非使用時）
+_COVER_DARK  = (  8,   8,   8, 255)
+_SPINE_BG    = ( 10,  10,  10, 255)
+_SPINE_TEXT  = (230, 230, 230, 255)
 
 
 def _load_font(
@@ -43,6 +56,17 @@ def _load_font(
     return ImageFont.load_default()
 
 
+def _load_asset(name: str) -> "Image.Image | None":
+    """assetsディレクトリからテンプレート画像を読み込む。失敗時はNone。"""
+    path = _ASSETS_DIR / name
+    if not path.exists():
+        return None
+    try:
+        return Image.open(path).convert("RGBA")
+    except Exception:
+        return None
+
+
 def _draw_vertical_text(
     draw: "ImageDraw.ImageDraw",
     chars: list[str],
@@ -53,7 +77,7 @@ def _draw_vertical_text(
     color: tuple,
     spacing: int = 2,
 ) -> int:
-    """1文字ずつ縦に描画し、描画終了Y座標を返す。"""
+    """1文字ずつ縦に積み重ねて描画し、描画終了Y座標を返す。"""
     y = y_start
     for ch in chars:
         bbox = draw.textbbox((0, 0), ch, font=font)
@@ -67,38 +91,92 @@ def _draw_vertical_text(
     return y
 
 
+def _calc_total_text_h(
+    draw: "ImageDraw.ImageDraw",
+    chars: list[str],
+    font: "ImageFont.FreeTypeFont | ImageFont.ImageFont",
+    spacing: int,
+) -> int:
+    """縦書き時のテキスト総高さを計算する。"""
+    return (
+        sum(
+            draw.textbbox((0, 0), c, font=font)[3] - draw.textbbox((0, 0), c, font=font)[1]
+            for c in chars
+        )
+        + spacing * max(0, len(chars) - 1)
+    )
+
+
 def _add_spine_highlight(spine_img: "Image.Image") -> None:
-    """背表紙の右端寄りにプラスチックケースの光沢反射を追加する。"""
+    """背表紙にプラスチックケースの光沢を2層で追加する。
+
+    Layer 1 — アンビエント: 左→右の線形グラデーション（立体的な面の向き）
+    Layer 2 — スペキュラー: 右端寄りの鋭い光沢帯（直接光の反射）
+    """
     sw, sh = spine_img.size
     if sw < 6:
         return
 
-    highlight = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
+    # ── Layer 1: アンビエントグラデーション（控えめ） ────────────
+    ambient = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
+    a_draw = ImageDraw.Draw(ambient)
+    for x in range(sw):
+        t = x / max(1, sw - 1)          # 0.0(左端) → 1.0(右端)
+        alpha = int(15 * t)              # 最大α=15（主役はスペキュラー）
+        a_draw.line([(x, 0), (x, sh - 1)], fill=(255, 255, 255, alpha))
+    spine_img.paste(Image.alpha_composite(spine_img, ambient), (0, 0))
 
-    # 反射帯の位置: 右端から20-35%あたりに縦のハイライト
-    center_x = int(sw * 0.75)
-    width = max(2, int(sw * 0.25))
-
+    # ── Layer 2: スペキュラーハイライト（右端の鋭い光沢線） ──────
+    specular = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
+    s_draw = ImageDraw.Draw(specular)
+    center_x = int(sw * 0.88)           # より右端寄り
+    width = max(1, int(sw * 0.13))      # 幅を狭く
     for x in range(sw):
         dist = abs(x - center_x)
         if dist > width:
             continue
-        # 中心が最も明るく、端に向かってフェード
         t = 1.0 - (dist / width)
-        alpha = int(50 * t * t)
-        for y in range(sh):
-            highlight.putpixel((x, y), (255, 255, 255, alpha))
-
-    spine_img.paste(Image.alpha_composite(spine_img, highlight), (0, 0))
+        alpha = int(110 * t * t * t)    # α最大110・3乗で鋭い収束
+        s_draw.line([(x, 0), (x, sh - 1)], fill=(255, 255, 255, alpha))
+    spine_img.paste(Image.alpha_composite(spine_img, specular), (0, 0))
 
 
 def decorate_cover(cover: "Image.Image", ch: int) -> None:
-    """カバー正面の上下にDVDトールケースの黒帯を描画する。"""
+    """カバー正面にPS2パッケージ風の装飾を描画する。
+
+    assets/ps2_topbar.png をカバー幅にリサイズして上部に合成。
+    アセットが存在しない場合はテキスト描画でフォールバック。
+    下部に薄い黒帯を描画。
+    """
     cw = cover.size[0]
-    case_band = max(2, int(ch * 0.02))
     draw = ImageDraw.Draw(cover)
-    draw.rectangle([(0, 0), (cw, case_band)], fill=(20, 20, 20, 255))
-    draw.rectangle([(0, ch - case_band), (cw, ch)], fill=(20, 20, 20, 255))
+
+    topbar = _load_asset("ps2_topbar.png")
+
+    if topbar is not None:
+        # テンプレート帯をカバー幅に合わせてリサイズ
+        # 元のアスペクト比を維持（高さ比率を転用）
+        orig_w, orig_h = topbar.size
+        top_h = max(10, int(cw * orig_h / orig_w))
+        top_h = min(top_h, int(ch * 0.12))   # カバー高の12%を上限
+        resized = topbar.resize((cw, top_h), Image.LANCZOS)
+        cover.paste(resized, (0, 0), resized)
+    else:
+        # フォールバック: テキスト描画
+        top_h = max(10, int(ch * 0.082))
+        draw.rectangle([(0, 0), (cw, top_h)], fill=_COVER_DARK)
+        font_size = max(7, int(top_h * 0.58))
+        font = _load_font(font_size)
+        text = "PlayStation\u00ae2"
+        bbox = draw.textbbox((0, 0), text, font=font)
+        th = bbox[3] - bbox[1]
+        tx = max(4, int(cw * 0.04))
+        ty = max(0, (top_h - th) // 2)
+        draw.text((tx, ty), text, fill=(230, 230, 230, 255), font=font)
+
+    # 下部帯（薄い黒）
+    bot_h = max(2, int(ch * 0.018))
+    draw.rectangle([(0, ch - bot_h), (cw, ch)], fill=_COVER_DARK)
 
 
 def decorate_spine(
@@ -107,99 +185,96 @@ def decorate_spine(
     system: str = "",
     font_path: str = "",
 ) -> None:
-    """背表紙にDVDトールケース風の装飾を描画する。
-    上から: [黒帯(パッケージ上)] [黒帯(プラットフォーム名/横書き回転)]
-            [白帯(タイトル/縦書き)] [黒帯(パッケージ下)]
+    """背表紙に公式PS2テンプレートを合成して装飾する。
+
+    assets/ps2_spine.png (PSロゴ+PlayStation.®2) をスパイン幅にリサイズして上部に合成し、
+    残りの黒背景エリアにゲームタイトルを縦書き白文字でセンタリング描画する。
+    アセットが存在しない場合はテキスト描画でフォールバック。
     """
     sw, sh = spine_img.size
     if sw < 6:
         return
 
-    platform_name = PLATFORM_DISPLAY.get(system.lower(), system) if system else ""
-
     draw = ImageDraw.Draw(spine_img)
-    x_center = sw // 2
 
-    case_top_h = int(sh * 0.02)
-    case_bot_h = int(sh * 0.02)
+    edge_h = max(3, int(sh * 0.022))   # 上下エッジ高さを先に確定
 
-    # --- プラットフォーム名領域（黒背景 + 横書き回転） ---
-    plat_region_h = 0
-    plat_rotated: "Image.Image | None" = None
+    brand_asset = _load_asset("ps2_spine.png")
+    brand_bottom_y = edge_h   # ブランディング画像の描画終了Y座標
 
-    if platform_name:
-        plat_font_size = max(6, int(sw * 0.50))
-        plat_font = _load_font(plat_font_size, font_path)
-        plat_bbox = draw.textbbox((0, 0), platform_name, font=plat_font)
-        text_w = plat_bbox[2] - plat_bbox[0]
-        text_h = plat_bbox[3] - plat_bbox[1]
+    if brand_asset is not None:
+        # スパイン幅に合わせてリサイズ（高さはアスペクト比で決定）
+        orig_w, orig_h = brand_asset.size
+        brand_h = int(sw * orig_h / orig_w)
+        brand_h = min(brand_h, int(sh * 0.45))   # スパイン高の45%を上限
 
-        while text_w > sh * 0.35 and plat_font_size > 5:
-            plat_font_size -= 1
+        # 上部: 黒（エッジ＋ブランディング領域）
+        draw.rectangle([(0, 0), (sw, edge_h + brand_h)], fill=_SPINE_BG)
+        resized_brand = brand_asset.resize((sw, brand_h), Image.LANCZOS)
+        # エッジ分ずらして貼り付け → エッジがロゴに被らない
+        spine_img.paste(resized_brand, (0, edge_h), resized_brand)
+
+        # 下部: 白（タイトル領域）
+        draw.rectangle([(0, edge_h + brand_h), (sw, sh)], fill=(255, 255, 255, 255))
+
+        brand_bottom_y = edge_h + brand_h + max(2, int(sh * 0.012))
+    else:
+        # フォールバック: テキスト縦積み描画
+        platform_name = PLATFORM_DISPLAY.get(system.lower(), system) if system else ""
+        if platform_name:
+            plat_font_size = max(5, int(sw * 0.50))
             plat_font = _load_font(plat_font_size, font_path)
-            plat_bbox = draw.textbbox((0, 0), platform_name, font=plat_font)
-            text_w = plat_bbox[2] - plat_bbox[0]
-            text_h = plat_bbox[3] - plat_bbox[1]
+            plat_chars = list(platform_name)
+            plat_spacing = max(0, int(plat_font_size * 0.05))
+            total_plat_h = _calc_total_text_h(draw, plat_chars, plat_font, plat_spacing)
+            while total_plat_h > sh * 0.35 and plat_font_size > 5:
+                plat_font_size -= 1
+                plat_font = _load_font(plat_font_size, font_path)
+                plat_spacing = max(0, int(plat_font_size * 0.05))
+                total_plat_h = _calc_total_text_h(draw, plat_chars, plat_font, plat_spacing)
+            brand_bottom_y = _draw_vertical_text(
+                draw, plat_chars, plat_font,
+                sw // 2, max(2, int(sh * 0.018)),
+                sh - max(2, int(sh * 0.018)),
+                _SPINE_TEXT, plat_spacing,
+            ) + max(2, int(sh * 0.015))
 
-        pad = max(2, int(text_h * 0.3))
-        tmp_w = text_w + pad * 2
-        tmp_h = text_h + pad * 2
-        tmp = Image.new("RGBA", (tmp_w, tmp_h), (0, 0, 0, 0))
-        tmp_draw = ImageDraw.Draw(tmp)
-        tmp_draw.text((pad, pad), platform_name, fill=(255, 255, 255, 230), font=plat_font)
-        plat_rotated = tmp.rotate(-90, expand=True, resample=Image.BICUBIC)
-        plat_region_h = plat_rotated.size[1]
+    # ── 上下エッジ: 最前面で確定（白塗りやブランディングへの被りを防ぐ） ──
+    draw.rectangle([(0, 0),           (sw, edge_h)],  fill=_SPINE_BG)
+    draw.rectangle([(0, sh - edge_h), (sw, sh)],      fill=_SPINE_BG)
 
-    total_black_top = case_top_h + plat_region_h
-    title_region_top = total_black_top
-    title_region_bot = sh - case_bot_h
-
-    # 背景塗り分け: 全面黒 → タイトル領域だけ白
-    draw.rectangle([(0, 0), (sw, sh)], fill=(20, 20, 20, 255))
+    # ── タイトル: 縦書き白文字・センタリング ──────────────────
     if title:
-        draw.rectangle(
-            [(0, title_region_top), (sw, title_region_bot)],
-            fill=(255, 255, 255, 255),
-        )
+        bot_pad = edge_h
+        t_margin = max(2, int(sh * 0.012))
+        t_start  = brand_bottom_y + t_margin
+        t_end    = sh - bot_pad - t_margin
 
-    # プラットフォーム名（回転画像を貼り付け）
-    if plat_rotated is not None:
-        pr_w, pr_h = plat_rotated.size
-        px = (sw - pr_w) // 2
-        py = case_top_h
-        spine_img.paste(plat_rotated, (px, py), plat_rotated)
+        if t_end > t_start + 10:
+            t_font_size = max(7, int(sw * 0.60))
+            t_font      = _load_font(t_font_size, font_path)
+            t_chars     = list(title)
+            t_spacing   = max(1, int(t_font_size * 0.10))
 
-    # タイトル（白背景上に黒文字で縦書き）
-    if title:
-        title_pad = int(sw * 0.15)
-        title_y_start = title_region_top + title_pad
-        title_y_end = title_region_bot - title_pad
+            draw2 = ImageDraw.Draw(spine_img)
+            total_h = _calc_total_text_h(draw2, t_chars, t_font, t_spacing)
+            while total_h > (t_end - t_start) and t_font_size > 6:
+                t_font_size -= 1
+                t_font      = _load_font(t_font_size, font_path)
+                t_spacing   = max(1, int(t_font_size * 0.10))
+                total_h     = _calc_total_text_h(draw2, t_chars, t_font, t_spacing)
 
-        title_font_size = max(7, int(sw * 0.55))
-        title_font = _load_font(title_font_size, font_path)
-        title_chars = list(title)
-        title_spacing = max(1, int(title_font_size * 0.12))
+            y_offset = max(0, (t_end - t_start - total_h) // 2)
+            # 下部は白背景なので黒文字（アセットなし時は白文字のまま）
+            title_color = (20, 20, 20, 230) if brand_asset is not None else _SPINE_TEXT
+            _draw_vertical_text(
+                draw2, t_chars, t_font,
+                sw // 2,
+                t_start + y_offset,
+                t_end,
+                title_color,
+                t_spacing,
+            )
 
-        draw = ImageDraw.Draw(spine_img)
-
-        total_title_h = sum(
-            draw.textbbox((0, 0), c, font=title_font)[3] - draw.textbbox((0, 0), c, font=title_font)[1]
-            for c in title_chars
-        ) + title_spacing * max(0, len(title_chars) - 1)
-
-        while total_title_h > (title_y_end - title_y_start) and title_font_size > 6:
-            title_font_size -= 1
-            title_font = _load_font(title_font_size, font_path)
-            title_spacing = max(1, int(title_font_size * 0.12))
-            total_title_h = sum(
-                draw.textbbox((0, 0), c, font=title_font)[3] - draw.textbbox((0, 0), c, font=title_font)[1]
-                for c in title_chars
-            ) + title_spacing * max(0, len(title_chars) - 1)
-
-        _draw_vertical_text(
-            draw, title_chars, title_font, x_center,
-            title_y_start, title_y_end, (0, 0, 0, 200), title_spacing,
-        )
-
-    # --- 光沢反射（右端寄りの縦ハイライト）---
+    # ── 光沢ハイライト ────────────────────────────────────────
     _add_spine_highlight(spine_img)

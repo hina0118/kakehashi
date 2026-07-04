@@ -244,33 +244,87 @@ def detect_logo(image_or_path: "Image.Image | Path | str", margin_pct: float = 0
     return all_detections
 
 
+def _content_bbox_from_alpha(
+    image: Image.Image,
+    threshold: int = 10,
+    padding: int = 4,
+) -> tuple[int, int, int, int]:
+    """アルファチャンネルから実コンテンツの bounding box を取得する。
+
+    BiRefNet適用後の透過画像に対して、不透明ピクセルの実範囲を返す。
+    ロゴ端の文字が切れないよう padding px の余白を加える。
+    """
+    import numpy as np
+
+    alpha = np.array(image.getchannel("A"))
+    mask = alpha > threshold
+    rows = np.any(mask, axis=1)
+    cols = np.any(mask, axis=0)
+    if not rows.any():
+        return (0, 0, image.width, image.height)
+
+    y1, y2 = int(np.where(rows)[0][0]),  int(np.where(rows)[0][-1])
+    x1, x2 = int(np.where(cols)[0][0]),  int(np.where(cols)[0][-1])
+
+    return (
+        max(0, x1 - padding),
+        max(0, y1 - padding),
+        min(image.width,  x2 + padding + 1),
+        min(image.height, y2 + padding + 1),
+    )
+
+
 def extract_logo(
     image_or_path: "Image.Image | Path | str",
     margin_pct: float = 0.05,
     transparent: bool = True,
+    expand_pct: float = 0.25,
 ) -> "Image.Image | None":
     """カバー画像からタイトルロゴを切り出して返す。検出できなければ None。
 
     Args:
         image_or_path: PIL Image または画像ファイルパス
-        margin_pct: bboxの各辺に追加するマージン比率 (0.05 = 5%)
+        margin_pct: Florence-2 bbox に追加するマージン比率 (0.05 = 5%)
         transparent: True なら BiRefNet で背景除去して透過PNG化する
+        expand_pct: BiRefNet 適用前に bbox をさらに拡張する比率 (0.12 = 12%)
+                    サブテキストや装飾が端で切れるのを防ぐ。
     """
     if isinstance(image_or_path, (str, Path)):
         image = Image.open(image_or_path).convert("RGBA")
     else:
         image = image_or_path.convert("RGBA")
 
+    img_w, img_h = image.size
     rgb_image = image.convert("RGB")
     detections = detect_logo(rgb_image, margin_pct=margin_pct)
     if not detections:
         return None
 
     best = detections[0]
-    cropped = image.crop(best.to_tuple())
 
     if transparent:
-        cropped = remove_background(cropped)
+        # 複数検出がある場合はユニオンbboxを使う（サブテキストの取りこぼし防止）
+        union = LogoDetection(
+            x1=min(d.x1 for d in detections),
+            y1=min(d.y1 for d in detections),
+            x2=max(d.x2 for d in detections),
+            y2=max(d.y2 for d in detections),
+            label=best.label,
+            confidence_hint="primary",
+        )
+
+        # ユニオンbboxをマージン付きで拡張してメインクロップを確定
+        wide_det = union.with_margin(expand_pct, img_w, img_h)
+        wide_crop = image.crop(wide_det.to_tuple())
+
+        # BiRefNetで背景除去
+        bg_removed = remove_background(wide_crop)
+
+        # アルファマスクから実コンテンツのbboxを逆算してトリミング
+        content_box = _content_bbox_from_alpha(bg_removed)
+        cropped = bg_removed.crop(content_box)
+    else:
+        cropped = image.crop(best.to_tuple())
 
     return cropped
 
