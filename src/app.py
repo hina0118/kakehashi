@@ -46,6 +46,8 @@ def build_ui(root: tk.Tk, config: dict) -> None:
 
     btn_media_check = tk.Button(topbar, text="メディアチェック", font=("Arial", 9), state="disabled")
     btn_media_check.pack(side="right", padx=(4, 8), pady=5)
+    btn_sync = tk.Button(topbar, text="同期", font=("Arial", 9))
+    btn_sync.pack(side="right", padx=(4, 0), pady=5)
 
     systems = discover_systems(config)
     current_system = config.get("system", systems[0] if systems else "")
@@ -54,6 +56,13 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     combo.pack(side="right", padx=(4, 8), pady=5)
     combo.bind("<<ComboboxSelected>>", lambda e: load_file())
     tk.Label(topbar, text="対象機種:", font=("Arial", 9), bg="#f5f5f5").pack(side="right", pady=5)
+
+    # SSH接続設定（「同期」ウィンドウとload_file()の両方が参照するため共有する）
+    _sync_cfg = config.get("sync", {})
+    sync_host_var = tk.StringVar(value=_sync_cfg.get("host", ""))
+    sync_port_var = tk.StringVar(value=str(_sync_cfg.get("port", 22)))
+    sync_user_var = tk.StringVar(value=_sync_cfg.get("username", "deck"))
+    sync_pass_var = tk.StringVar(value=_sync_cfg.get("password", ""))
 
     tk.Frame(root, height=1, bg="#cccccc").pack(fill="x")
 
@@ -179,60 +188,57 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     media_canvas.bind("<Enter>", lambda e: media_canvas.bind_all("<MouseWheel>", _on_media_mousewheel))
     media_canvas.bind("<Leave>", lambda e: media_canvas.unbind_all("<MouseWheel>"))
 
-    # ── タブ3: 同期 ─────────────────────────────────────────────
-    tab_sync = tk.Frame(notebook)
-    notebook.add(tab_sync, text="同期")
+    # ── 「同期」ウィンドウ（システム全体が対象のため、選択中ゲームのタブ群とは別の独立ウィンドウにする）
+    def open_sync_window() -> None:
+        win = tk.Toplevel(root)
+        win.title("同期")
+        win.geometry("900x650")
+        win.minsize(700, 480)
 
-    if not _PARAMIKO_OK:
-        # paramiko 未インストール時の案内
-        _no_param_frame = tk.Frame(tab_sync)
-        _no_param_frame.pack(expand=True)
-        tk.Label(
-            _no_param_frame,
-            text="⚠  paramiko がインストールされていません",
-            font=("Arial", 11, "bold"), fg="#cc6600",
-        ).pack(pady=(0, 8))
-        tk.Label(
-            _no_param_frame,
-            text="以下のコマンドを実行してから再起動してください:",
-            font=("Arial", 9), fg="#444",
-        ).pack()
-        tk.Label(
-            _no_param_frame,
-            text="    pip install paramiko    (または  uv sync)",
-            font=("Courier", 10), fg="#003399", bg="#f0f4ff",
-            relief="sunken", padx=12, pady=6,
-        ).pack(pady=(6, 0))
-    else:
-        _sync_cfg = config.get("sync", {})
+        if not _PARAMIKO_OK:
+            # paramiko 未インストール時の案内
+            _no_param_frame = tk.Frame(win)
+            _no_param_frame.pack(expand=True)
+            tk.Label(
+                _no_param_frame,
+                text="⚠  paramiko がインストールされていません",
+                font=("Arial", 11, "bold"), fg="#cc6600",
+            ).pack(pady=(0, 8))
+            tk.Label(
+                _no_param_frame,
+                text="以下のコマンドを実行してから再起動してください:",
+                font=("Arial", 9), fg="#444",
+            ).pack()
+            tk.Label(
+                _no_param_frame,
+                text="    pip install paramiko    (または  uv sync)",
+                font=("Courier", 10), fg="#003399", bg="#f0f4ff",
+                relief="sunken", padx=12, pady=6,
+            ).pack(pady=(6, 0))
+            return
 
-        # ── 接続設定フレーム ────────────────────────────────────
-        conn_lf = tk.LabelFrame(
-            tab_sync, text="SSH接続設定 (Steam Deck)",
-            font=("Arial", 9, "bold"), padx=8, pady=6,
-        )
-        conn_lf.pack(fill="x", padx=8, pady=(8, 4))
+        content = tk.Frame(win)
+        content.pack(fill="both", expand=True, padx=14, pady=12)
 
-        _r0 = tk.Frame(conn_lf)
-        _r0.pack(fill="x", pady=2)
-        tk.Label(_r0, text="ホスト (IP):", font=("Arial", 9), width=12, anchor="w").pack(side="left")
-        sync_host_var = tk.StringVar(value=_sync_cfg.get("host", ""))
-        tk.Entry(_r0, textvariable=sync_host_var, font=("Arial", 9), width=20).pack(side="left", padx=(0, 16))
-        tk.Label(_r0, text="ポート:", font=("Arial", 9)).pack(side="left")
-        sync_port_var = tk.StringVar(value=str(_sync_cfg.get("port", 22)))
-        tk.Entry(_r0, textvariable=sync_port_var, font=("Arial", 9), width=6).pack(side="left", padx=(4, 0))
+        # ── 接続設定 ─────────────────────────────────────────
+        # sync_host_var等はbuild_ui()冒頭で定義済み（load_file()と共有するため）
+        tk.Label(content, text="接続設定 (Steam Deck)", font=("Arial", 9, "bold"), anchor="w").pack(fill="x")
+        tk.Frame(content, height=1, bg="#eeeeee").pack(fill="x", pady=(4, 8))
 
-        _r1 = tk.Frame(conn_lf)
-        _r1.pack(fill="x", pady=2)
-        tk.Label(_r1, text="ユーザー名:", font=("Arial", 9), width=12, anchor="w").pack(side="left")
-        sync_user_var = tk.StringVar(value=_sync_cfg.get("username", "deck"))
-        tk.Entry(_r1, textvariable=sync_user_var, font=("Arial", 9), width=16).pack(side="left", padx=(0, 16))
-        tk.Label(_r1, text="パスワード:", font=("Arial", 9)).pack(side="left")
-        sync_pass_var = tk.StringVar(value=_sync_cfg.get("password", ""))
-        tk.Entry(_r1, textvariable=sync_pass_var, show="*", font=("Arial", 9), width=16).pack(side="left", padx=(4, 0))
+        conn_grid = tk.Frame(content)
+        conn_grid.pack(fill="x")
+        conn_grid.columnconfigure(1, weight=1)
+        conn_grid.columnconfigure(3, weight=1)
 
-        sync_conn_label = tk.Label(conn_lf, text="", font=("Arial", 9))
-        sync_conn_label.pack(anchor="w", pady=(4, 0))
+        tk.Label(conn_grid, text="ホスト (IP):", font=("Arial", 9), anchor="w").grid(row=0, column=0, sticky="w", pady=2)
+        tk.Entry(conn_grid, textvariable=sync_host_var, font=("Arial", 9)).grid(row=0, column=1, sticky="ew", padx=(6, 20))
+        tk.Label(conn_grid, text="ポート:", font=("Arial", 9), anchor="w").grid(row=0, column=2, sticky="w")
+        tk.Entry(conn_grid, textvariable=sync_port_var, font=("Arial", 9), width=8).grid(row=0, column=3, sticky="w", padx=(6, 0))
+
+        tk.Label(conn_grid, text="ユーザー名:", font=("Arial", 9), anchor="w").grid(row=1, column=0, sticky="w", pady=2)
+        tk.Entry(conn_grid, textvariable=sync_user_var, font=("Arial", 9)).grid(row=1, column=1, sticky="ew", padx=(6, 20))
+        tk.Label(conn_grid, text="パスワード:", font=("Arial", 9), anchor="w").grid(row=1, column=2, sticky="w")
+        tk.Entry(conn_grid, textvariable=sync_pass_var, show="*", font=("Arial", 9)).grid(row=1, column=3, sticky="ew", padx=(6, 0))
 
         def _save_sync_cfg() -> None:
             config.setdefault("sync", {})
@@ -255,7 +261,7 @@ def build_ui(root: tk.Tk, config: dict) -> None:
                 sync_conn_label.config(text="✗  ホストを入力してください", fg="#cc0000")
                 return
             sync_conn_label.config(text="接続テスト中...", fg="#666666")
-            tab_sync.update_idletasks()
+            win.update_idletasks()
             try:
                 test_connection(
                     host=host,
@@ -268,64 +274,92 @@ def build_ui(root: tk.Tk, config: dict) -> None:
             except Exception as _ex:
                 sync_conn_label.config(text=f"✗  {_ex}", fg="#cc0000")
 
-        _btn_row = tk.Frame(conn_lf)
-        _btn_row.pack(fill="x", pady=(6, 0))
+        conn_status_row = tk.Frame(content)
+        conn_status_row.pack(fill="x", pady=(8, 0))
         tk.Button(
-            _btn_row, text="接続テスト & 保存", font=("Arial", 9),
+            conn_status_row, text="接続テスト & 保存", font=("Arial", 9),
             command=_test_connection,
         ).pack(side="left")
+        sync_conn_label = tk.Label(conn_status_row, text="", font=("Arial", 9))
+        sync_conn_label.pack(side="left", padx=(12, 0))
 
-        # ── 転送設定フレーム ────────────────────────────────────
-        xfer_lf = tk.LabelFrame(
-            tab_sync, text="転送設定",
-            font=("Arial", 9, "bold"), padx=8, pady=6,
-        )
-        xfer_lf.pack(fill="x", padx=8, pady=4)
+        tk.Frame(content, height=1, bg="#eeeeee").pack(fill="x", pady=(12, 8))
 
-        _x0 = tk.Frame(xfer_lf)
-        _x0.pack(fill="x", pady=2)
-        tk.Label(_x0, text="転送内容:", font=("Arial", 9), width=12, anchor="w").pack(side="left")
-        sync_gl_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(_x0, text="gamelist.xml（プッシュ時のみ）", variable=sync_gl_var, font=("Arial", 9)).pack(side="left")
+        # ── 転送内容 ─────────────────────────────────────────
+        tk.Label(content, text="転送内容", font=("Arial", 9, "bold"), anchor="w").pack(fill="x")
+
+        gl_row = tk.Frame(content)
+        gl_row.pack(fill="x", pady=(6, 4))
+        tk.Label(gl_row, text="gamelist.xml", font=("Arial", 9)).pack(side="left")
+        gl_status_label = tk.Label(gl_row, font=("Arial", 9))
+        gl_status_label.pack(side="left", padx=(10, 0))
+
+        def _refresh_gl_status() -> None:
+            n = len(state["dirty"]) + len(state["deleted_paths"])
+            if n > 0:
+                gl_status_label.config(text=f"未同期の変更: {n}件", fg="#cc6600")
+            else:
+                gl_status_label.config(text="変更なし", fg="#888888")
+
+        _refresh_gl_status()
+
+        tk.Frame(content, height=1, bg="#f2f2f2").pack(fill="x", pady=(6, 6))
+
+        media_row = tk.Frame(content)
+        media_row.pack(fill="x")
         sync_media_chk_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(
-            _x0, text="メディア", variable=sync_media_chk_var, font=("Arial", 9),
-        ).pack(side="left", padx=(16, 0))
+        tk.Checkbutton(media_row, text="メディア", variable=sync_media_chk_var, font=("Arial", 9)).pack(side="left")
+
+        media_select_all_btn = tk.Button(media_row, text="すべて選択", font=("Arial", 8))
+        media_select_none_btn = tk.Button(media_row, text="すべて解除", font=("Arial", 8))
+        media_select_none_btn.pack(side="right")
+        media_select_all_btn.pack(side="right", padx=(0, 6))
 
         # メディアタイプ チェックボックス群
-        _mt_frame = tk.Frame(xfer_lf)
-        _mt_frame.pack(fill="x", pady=(2, 0), padx=(24, 0))
+        _mt_frame = tk.Frame(content)
+        _mt_frame.pack(fill="x", pady=(4, 0), padx=(20, 0))
         _default_on = {"covers", "screenshots", "videos"}
         sync_media_type_vars: dict[str, tk.BooleanVar] = {}
         for _mi, _mf in enumerate(MEDIA_FOLDERS):
             _mv = tk.BooleanVar(value=_mf in _default_on)
-            _mcb = tk.Checkbutton(_mt_frame, text=_mf, variable=_mv, font=("Arial", 8))
-            _mcb.grid(row=_mi // 4, column=_mi % 4, sticky="w", padx=2)
+            _mcb = tk.Checkbutton(_mt_frame, text=_mf, variable=_mv, font=("Arial", 9))
+            _mcb.grid(row=_mi // 4, column=_mi % 4, sticky="w", padx=(0, 20), pady=2)
             sync_media_type_vars[_mf] = _mv
+
+        def _set_all_media(value: bool) -> None:
+            for _v in sync_media_type_vars.values():
+                _v.set(value)
+
+        media_select_all_btn.config(command=lambda: _set_all_media(True))
+        media_select_none_btn.config(command=lambda: _set_all_media(False))
 
         def _toggle_media_cbs(*_) -> None:
             _st = "normal" if sync_media_chk_var.get() else "disabled"
             for _w in _mt_frame.winfo_children():
                 _w.config(state=_st)
+            media_select_all_btn.config(state=_st)
+            media_select_none_btn.config(state=_st)
 
         sync_media_chk_var.trace_add("write", _toggle_media_cbs)
 
-        _x1 = tk.Frame(xfer_lf)
-        _x1.pack(fill="x", pady=(8, 2))
-        tk.Label(_x1, text="既存ファイル:", font=("Arial", 9), width=12, anchor="w").pack(side="left")
+        overwrite_row = tk.Frame(content)
+        overwrite_row.pack(fill="x", padx=(20, 0), pady=(8, 0))
+        tk.Label(overwrite_row, text="既存ファイル:", font=("Arial", 9), anchor="w").pack(side="left")
         sync_overwrite_var = tk.BooleanVar(value=False)
         tk.Radiobutton(
-            _x1, text="スキップ（差分のみ転送）",
+            overwrite_row, text="スキップ（差分のみ転送）",
             variable=sync_overwrite_var, value=False, font=("Arial", 9),
-        ).pack(side="left")
+        ).pack(side="left", padx=(8, 0))
         tk.Radiobutton(
-            _x1, text="上書き",
+            overwrite_row, text="上書き",
             variable=sync_overwrite_var, value=True, font=("Arial", 9),
         ).pack(side="left", padx=(16, 0))
 
+        tk.Frame(content, height=1, bg="#eeeeee").pack(fill="x", pady=(12, 8))
+
         # ── 実行コントロール ────────────────────────────────────
-        _ctrl = tk.Frame(tab_sync)
-        _ctrl.pack(fill="x", padx=8, pady=6)
+        _ctrl = tk.Frame(content)
+        _ctrl.pack(fill="x")
 
         sync_progress = ttk.Progressbar(_ctrl, mode="determinate", length=200)
         sync_progress.pack(side="left", fill="x", expand=True, padx=(0, 8))
@@ -338,20 +372,22 @@ def build_ui(root: tk.Tk, config: dict) -> None:
         btn_sync_run.pack(side="right")
 
         btn_pull_run = tk.Button(
-            _ctrl, text="← プル", font=("Arial", 9, "bold"),
+            _ctrl, text="← メディアをプル", font=("Arial", 9, "bold"),
             bg="#4a8f3f", fg="white", activebackground="#3a7030",
             relief="flat", padx=14, pady=3,
         )
         btn_pull_run.pack(side="right", padx=(0, 6))
 
-        # ── ログエリア ──────────────────────────────────────────
-        _log_lf = tk.LabelFrame(tab_sync, text="ログ", font=("Arial", 9, "bold"), padx=4, pady=4)
-        _log_lf.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        # ── ログ ────────────────────────────────────────────
+        tk.Label(content, text="ログ", font=("Arial", 9, "bold"), anchor="w").pack(fill="x", pady=(12, 0))
+        tk.Frame(content, height=1, bg="#eeeeee").pack(fill="x", pady=(4, 6))
 
-        _log_sb = tk.Scrollbar(_log_lf)
+        log_frame = tk.Frame(content)
+        log_frame.pack(fill="both", expand=True)
+        _log_sb = tk.Scrollbar(log_frame)
         _log_sb.pack(side="right", fill="y")
         sync_log = tk.Text(
-            _log_lf, font=("Courier", 8),
+            log_frame, font=("Courier", 8),
             yscrollcommand=_log_sb.set, state="disabled", wrap="none",
         )
         sync_log.pack(fill="both", expand=True)
@@ -369,9 +405,6 @@ def build_ui(root: tk.Tk, config: dict) -> None:
             sync_log.config(state="disabled")
 
         def _run_sync() -> None:
-            if not sync_gl_var.get() and not sync_media_chk_var.get():
-                messagebox.showwarning("設定エラー", "転送内容を1つ以上選択してください。")
-                return
             host = sync_host_var.get().strip()
             if not host:
                 messagebox.showwarning("設定エラー", "ホスト（Steam DeckのIPアドレス）を入力してください。")
@@ -404,28 +437,27 @@ def build_ui(root: tk.Tk, config: dict) -> None:
                             tasks.append((_f, f"{remote_media_base}/{system}/{folder}/{_f.name}"))
 
             overwrite = sync_overwrite_var.get()
-            push_gamelist = sync_gl_var.get()
             remote_gl = resolve_remote_gamelist_path(config, system)
 
             def _transfer() -> None:
                 try:
-                    if push_gamelist:
-                        if state["dirty"] or state["deleted_paths"]:
-                            applied, deleted = push_gamelist_diff(
-                                host=host,
-                                port=int(sync_port_var.get() or 22),
-                                username=sync_user_var.get(),
-                                password=sync_pass_var.get(),
-                                remote_path=remote_gl,
-                                diffs=state["dirty"],
-                                deleted_paths=state["deleted_paths"],
-                                backup_max=config.get("backup_max", 5),
-                                on_log=_log,
-                            )
-                            state["dirty"].clear()
-                            state["deleted_paths"].clear()
-                        else:
-                            _log("  [スキップ] gamelist.xmlの変更がありません")
+                    if state["dirty"] or state["deleted_paths"]:
+                        applied, deleted = push_gamelist_diff(
+                            host=host,
+                            port=int(sync_port_var.get() or 22),
+                            username=sync_user_var.get(),
+                            password=sync_pass_var.get(),
+                            remote_path=remote_gl,
+                            diffs=state["dirty"],
+                            deleted_paths=state["deleted_paths"],
+                            backup_max=config.get("backup_max", 5),
+                            on_log=_log,
+                        )
+                        state["dirty"].clear()
+                        state["deleted_paths"].clear()
+                        win.after(0, _refresh_gl_status)
+                    else:
+                        _log("  [スキップ] gamelist.xmlの変更がありません")
 
                     ok, skipped, errors = transfer_files(
                         host=host,
@@ -435,7 +467,7 @@ def build_ui(root: tk.Tk, config: dict) -> None:
                         tasks=tasks,
                         overwrite=overwrite,
                         on_log=_log,
-                        on_progress=lambda v: tab_sync.after(
+                        on_progress=lambda v: win.after(
                             0, lambda _v=v: sync_progress.__setitem__("value", _v)
                         ),
                     )
@@ -443,27 +475,27 @@ def build_ui(root: tk.Tk, config: dict) -> None:
                     _log(summary)
 
                     if errors == 0:
-                        tab_sync.after(0, lambda: messagebox.showinfo(
+                        win.after(0, lambda: messagebox.showinfo(
                             "転送完了",
                             f"転送が完了しました。\n転送: {ok} ファイル / スキップ: {skipped} ファイル",
                         ))
                     else:
-                        tab_sync.after(0, lambda: messagebox.showwarning(
+                        win.after(0, lambda: messagebox.showwarning(
                             "転送完了（一部エラーあり）",
                             f"転送は完了しましたが一部エラーがあります。\n転送: {ok} / スキップ: {skipped} / エラー: {errors}",
                         ))
 
                 except Exception as _ex:
                     _log(f"\n[エラー] {_ex}")
-                    tab_sync.after(0, lambda _m=str(_ex): messagebox.showerror("転送エラー", _m))
+                    win.after(0, lambda _m=str(_ex): messagebox.showerror("転送エラー", _m))
                 finally:
-                    tab_sync.after(0, lambda: btn_sync_run.config(state="normal", text="転送実行"))
+                    win.after(0, lambda: btn_sync_run.config(state="normal", text="転送実行"))
 
             threading.Thread(target=_transfer, daemon=True).start()
 
         def _run_pull() -> None:
             if not sync_media_chk_var.get():
-                messagebox.showwarning("設定エラー", "転送内容を1つ以上選択してください。\n（gamelist.xmlは編集時に都度リモート取得されるためプル不要です）")
+                messagebox.showwarning("設定エラー", "メディアの種類を1つ以上選択してください。")
                 return
             host = sync_host_var.get().strip()
             if not host:
@@ -507,7 +539,7 @@ def build_ui(root: tk.Tk, config: dict) -> None:
                         dir_mappings=dir_mappings,
                         overwrite=overwrite,
                         on_log=_log,
-                        on_progress=lambda v: tab_sync.after(
+                        on_progress=lambda v: win.after(
                             0, lambda _v=v: sync_progress.__setitem__("value", _v)
                         ),
                     )
@@ -515,27 +547,29 @@ def build_ui(root: tk.Tk, config: dict) -> None:
                     _log(summary)
 
                     if errors == 0:
-                        tab_sync.after(0, lambda: messagebox.showinfo(
+                        win.after(0, lambda: messagebox.showinfo(
                             "プル完了",
                             f"プルが完了しました。\n取得: {ok} ファイル / スキップ: {skipped} ファイル",
                         ))
                     else:
-                        tab_sync.after(0, lambda: messagebox.showwarning(
+                        win.after(0, lambda: messagebox.showwarning(
                             "プル完了（一部エラーあり）",
                             f"プルは完了しましたが一部エラーがあります。\n取得: {ok} / スキップ: {skipped} / エラー: {errors}",
                         ))
 
                 except Exception as _ex:
                     _log(f"\n[エラー] {_ex}")
-                    tab_sync.after(0, lambda _m=str(_ex): messagebox.showerror("プルエラー", _m))
+                    win.after(0, lambda _m=str(_ex): messagebox.showerror("プルエラー", _m))
                 finally:
-                    tab_sync.after(0, lambda: btn_pull_run.config(state="normal", text="← プル"))
-                    tab_sync.after(0, lambda: btn_sync_run.config(state="normal"))
+                    win.after(0, lambda: btn_pull_run.config(state="normal", text="← メディアをプル"))
+                    win.after(0, lambda: btn_sync_run.config(state="normal"))
 
             threading.Thread(target=_pull, daemon=True).start()
 
         btn_sync_run.config(command=_run_sync)
         btn_pull_run.config(command=_run_pull)
+
+    btn_sync.config(command=open_sync_window)
 
     _media_img_refs: list = []  # PhotoImage のガベージコレクション防止
 
