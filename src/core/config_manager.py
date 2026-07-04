@@ -38,24 +38,14 @@ def save_window_state(root: tk.Tk) -> None:
 
 
 def discover_systems(config: dict) -> list[str]:
-    """ローカル(Windows)の rom_base 配下のフォルダ名からシステム一覧を取得する。
-    フォルダが見つからない場合は config.json の systems にフォールバックする。
-    """
-    base = config.get("windows", {}).get("rom_base", "")
-    if base:
-        p = Path(base)
-        if p.is_dir():
-            dirs = sorted(d.name for d in p.iterdir() if d.is_dir())
-            if dirs:
-                return dirs
+    """config.json の systems リストからシステム一覧を取得する。"""
     return config.get("systems", [])
 
 
 def resolve_paths(config: dict, system: str) -> dict:
-    """ローカル(Windows)側のROM・メディアパスを解決する。"""
+    """ローカル(Windows)側のメディアパスを解決する。"""
     base = config.get("windows", {})
     return {
-        "rom_path":   str(Path(base.get("rom_base",   "")) / system),
         "media_path": str(Path(base.get("media_base", "")) / system),
     }
 
