@@ -18,3 +18,6 @@ ai = [
     "accelerate>=1.0.0",
     "kornia>=0.8.0",
 ]
+mcp = [
+    "mcp>=1.0.0",
+]

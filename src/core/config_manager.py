@@ -1,8 +1,10 @@
 import json
+import os
 import tkinter as tk
 from pathlib import Path
 
-CONFIG_PATH       = Path(__file__).parent.parent.parent / "config.json"
+_DEFAULT_CONFIG_PATH = Path(__file__).parent.parent.parent / "config.json"
+CONFIG_PATH       = Path(os.environ["KAKEHASHI_CONFIG_PATH"]) if os.environ.get("KAKEHASHI_CONFIG_PATH") else _DEFAULT_CONFIG_PATH
 WINDOW_STATE_PATH = Path(__file__).parent.parent.parent / "window_state.json"
 
 DEFAULT_GEOMETRY = "1100x700"
