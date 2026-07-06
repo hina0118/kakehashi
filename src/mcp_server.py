@@ -56,26 +56,46 @@ def list_games(system: str) -> list[dict]:
 
 
 @mcp.tool()
-def get_game(system: str, path: str) -> dict:
-    """指定した機種・pathのゲームの全メタデータフィールドを取得する。"""
+def get_games(system: str, paths: list[str] | None = None) -> list[dict]:
+    """指定した機種のゲームの全メタデータフィールドをまとめて取得する。
+
+    paths: 取得対象のpathのリスト。省略時は機種内の全ゲームを返す。
+    リモートgamelist.xmlの取得は呼び出し1回につき1回だけ行うため、
+    複数ゲームをまとめて確認したい場合は1件ずつget_gamesを呼ぶより高速。
+    """
     games = _fetch_games(system)
-    for g in games:
-        if get_field(g, "path") == path:
-            return {"path": path, **{f: get_field(g, f) for f in GAMELIST_FIELDS}}
-    raise ValueError(f"ゲームが見つかりません: system={system}, path={path}")
+    if paths is not None:
+        path_set = set(paths)
+        games = [g for g in games if get_field(g, "path") in path_set]
+    return [
+        {"path": get_field(g, "path"), **{f: get_field(g, f) for f in GAMELIST_FIELDS}}
+        for g in games
+    ]
 
 
 @mcp.tool()
-def update_game(system: str, path: str, fields: dict[str, str]) -> dict:
-    """指定した機種・pathのゲームのメタデータフィールドを更新し、Steam Deckへ反映する。
+def update_games(system: str, updates: list[dict]) -> dict:
+    """複数ゲームのメタデータをまとめて更新し、1回のリモート書き込みでSteam Deckへ反映する。
 
-    fields: 更新するタグ名と値の辞書。キーは name/desc/releasedate/developer/publisher/genre のいずれか。
-    最新のリモートgamelist.xmlを取得し、指定フィールドだけを上書きして書き戻す
-    （favorite/lastplayed等、kakehashiが管理しないタグには触れない）。
+    updates: [{"path": "./game.zip", "fields": {"name": "...", ...}}, ...] の形式のリスト。
+    fieldsのキーは name/desc/releasedate/developer/publisher/genre のいずれか。
+    最新のリモートgamelist.xmlを1回取得し、指定した各pathのフィールドだけを上書きして
+    まとめて書き戻す（favorite/lastplayed等、kakehashiが管理しないタグには触れない）。
+    1件ずつupdate_gamesを呼ぶより高速。
+
+    戻り値: {"applied": 実際に反映できた件数, "requested": 要求件数}
     """
-    unknown = set(fields) - set(GAMELIST_FIELDS)
-    if unknown:
-        raise ValueError(f"未対応のフィールドです: {sorted(unknown)}（対応: {GAMELIST_FIELDS}）")
+    diffs: dict[str, dict[str, str]] = {}
+    for item in updates:
+        path = item["path"]
+        fields = item["fields"]
+        unknown = set(fields) - set(GAMELIST_FIELDS)
+        if unknown:
+            raise ValueError(f"未対応のフィールドです（path={path}）: {sorted(unknown)}（対応: {GAMELIST_FIELDS}）")
+        diffs[path] = fields
+
+    if not diffs:
+        return {"applied": 0, "requested": 0}
 
     config = load_config()
     conn = _sync_conn(config)
@@ -87,13 +107,11 @@ def update_game(system: str, path: str, fields: dict[str, str]) -> dict:
         host=conn["host"], port=conn["port"],
         username=conn["username"], password=conn["password"],
         remote_path=remote_path,
-        diffs={path: fields}, deleted_paths=set(),
+        diffs=diffs, deleted_paths=set(),
         backup_max=config.get("backup_max", 5),
         on_log=lambda _msg: None,
     )
-    if applied == 0:
-        raise ValueError(f"ゲームが見つからず更新できませんでした: system={system}, path={path}")
-    return {"applied": applied}
+    return {"applied": applied, "requested": len(diffs)}
 
 
 if __name__ == "__main__":
