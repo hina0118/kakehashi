@@ -25,6 +25,40 @@ from src.media.logo_extractor import is_available as _ai_logo_available
 from src.media.miximage import generate_miximage, CANVAS_W, CANVAS_H
 
 
+def ytdlp_available() -> bool:
+    try:
+        import yt_dlp  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def download_video_via_ytdlp(url: str, dest_dir: Path, stem: str) -> Path:
+    """yt-dlpでURL(YouTube等の動画ページ、または動画ファイル本体への直リンク)を
+    ダウンロードし、保存先パスを返す。音声/映像の合成にffmpegを要しない
+    単一ファイル形式のみを対象にする。"""
+    import yt_dlp
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    ydl_opts = {
+        "outtmpl": str(dest_dir / f"{stem}.%(ext)s"),
+        "format": "best[ext=mp4]/best",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "logtostderr": True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        result_path = Path(ydl.prepare_filename(info))
+
+    if result_path.suffix.lower() not in VIDEO_SUFFIXES:
+        result_path.unlink(missing_ok=True)
+        raise ValueError(f"動画として取得できませんでした(拡張子: {result_path.suffix or '不明'})。")
+    return result_path
+
+
 def get_rom_stem(path_val: str) -> str:
     """gamelist.xml の <path> 値から拡張子なしファイル名を返す。
     例: "./Super Mario World.zip" → "Super Mario World"
@@ -107,8 +141,10 @@ def open_url_download_dialog(
     game_title: str,
     on_success: "callable[[], None]",
 ) -> None:
-    """URLからメディアファイルをダウンロードして登録するダイアログを開く。"""
+    """URLからメディアファイルをダウンロードして登録するダイアログを開く。
+    folderが"videos"の場合はyt-dlpが利用可能ならYouTube等の動画ページURLにも対応する。"""
     dest_dir = Path(media_path) / folder
+    use_ytdlp = folder == "videos" and ytdlp_available()
 
     dlg = tk.Toplevel(parent)
     dlg.title(f"{folder} — URLからDL登録")
@@ -152,6 +188,11 @@ def open_url_download_dialog(
         path_ext = Path(urllib.parse.urlparse(url).path).suffix.lower()
         if path_ext:
             dest_label.config(text=str(dest_dir / f"{stem}{path_ext}"), fg="#555")
+        elif use_ytdlp:
+            dest_label.config(
+                text="(動画ページURLの場合はyt-dlpで取得します。拡張子はDL時に決まります)",
+                fg="#888",
+            )
         else:
             dest_label.config(
                 text="(拡張子をURLから判定できません。DL時にContent-Typeで判定します)",
@@ -169,6 +210,28 @@ def open_url_download_dialog(
         if not url:
             messagebox.showwarning("URL未入力", "URLを入力してください。", parent=dlg)
             return
+
+        if use_ytdlp:
+            try:
+                dest = download_video_via_ytdlp(url, dest_dir, stem)
+            except Exception as e:
+                messagebox.showerror("ダウンロードエラー", str(e), parent=dlg)
+                return
+
+            if not messagebox.askokcancel(
+                "登録確認", f"保存先:\n{dest}\n\n登録しますか？", parent=dlg,
+            ):
+                dest.unlink(missing_ok=True)
+                return
+
+            for old in dest_dir.glob(f"{stem}.*"):
+                if old != dest:
+                    old.unlink()
+
+            dlg.destroy()
+            on_success()
+            return
+
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=30) as resp:

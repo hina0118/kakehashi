@@ -100,6 +100,26 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     left_frame = tk.Frame(paned, bg="white")
     paned.add(left_frame, minsize=160, width=240)
     tk.Label(left_frame, text="ゲーム一覧", font=("Arial", 9, "bold"), bg="white", anchor="w").pack(fill="x", padx=8, pady=(8, 4))
+
+    # フィルター（タイトル検索・動画の有無）
+    filter_frame = tk.Frame(left_frame, bg="white")
+    filter_frame.pack(fill="x", padx=8, pady=(0, 4))
+
+    filter_title_var = tk.StringVar()
+    filter_entry = tk.Entry(filter_frame, textvariable=filter_title_var, font=("Arial", 9))
+    filter_entry.pack(fill="x")
+    filter_title_var.trace_add("write", lambda *_a: apply_filter())
+
+    filter_video_row = tk.Frame(filter_frame, bg="white")
+    filter_video_row.pack(fill="x", pady=(4, 0))
+    tk.Label(filter_video_row, text="動画:", font=("Arial", 8), bg="white").pack(side="left")
+    filter_video_var = tk.StringVar(value="all")
+    for _label, _val in (("すべて", "all"), ("あり", "yes"), ("なし", "no")):
+        tk.Radiobutton(
+            filter_video_row, text=_label, variable=filter_video_var, value=_val,
+            font=("Arial", 8), bg="white", command=lambda: apply_filter(),
+        ).pack(side="left", padx=(4, 0))
+
     lb_frame = tk.Frame(left_frame)
     lb_frame.pack(fill="both", expand=True, padx=4, pady=(0, 4))
     lb_scroll = tk.Scrollbar(lb_frame)
@@ -355,8 +375,41 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     # ── ロジック ─────────────────────────────────────────────
     state: dict = {
         "root_elem": None, "games": [], "decl": "", "selected": -1,
-        "dirty": {}, "deleted_paths": set(),
+        "dirty": {}, "deleted_paths": set(), "visible": [],
     }
+
+    def _display_name(game: ET.Element) -> str:
+        return get_field(game, "name") or get_field(game, "path") or "(不明)"
+
+    def render_listbox() -> None:
+        """state["visible"]（表示対象のgamesインデックス列）に基づき一覧を再描画する。"""
+        listbox.delete(0, "end")
+        for gi in state["visible"]:
+            listbox.insert("end", _display_name(state["games"][gi]))
+
+    def apply_filter() -> None:
+        query = filter_title_var.get().strip().lower()
+        video_mode = filter_video_var.get()
+
+        video_stems: set[str] = set()
+        if video_mode != "all":
+            videos_dir = Path(resolve_paths(config, system_var.get())["media_path"]) / "videos"
+            if videos_dir.is_dir():
+                video_stems = {p.stem for p in videos_dir.iterdir() if p.is_file()}
+
+        visible = []
+        for i, game in enumerate(state["games"]):
+            if query and query not in _display_name(game).lower():
+                continue
+            if video_mode != "all":
+                has_video = get_rom_stem(get_field(game, "path")) in video_stems
+                if video_mode == "yes" and not has_video:
+                    continue
+                if video_mode == "no" and has_video:
+                    continue
+            visible.append(i)
+        state["visible"] = visible
+        render_listbox()
 
     def update_media_tab(game: ET.Element | None) -> None:
         """メディアタブをサムネイル付きテーブルで更新する。"""
@@ -554,16 +607,20 @@ def build_ui(root: tk.Tk, config: dict) -> None:
             if val != get_field(game, key) and path_val:
                 state["dirty"].setdefault(path_val, {})[key] = val
             set_field(game, key, val)
-        display = get_field(game, "name") or get_field(game, "path") or "(不明)"
-        listbox.delete(idx)
-        listbox.insert(idx, display)
+        try:
+            row = state["visible"].index(idx)
+        except ValueError:
+            row = None
+        if row is not None:
+            listbox.delete(row)
+            listbox.insert(row, _display_name(game))
         _refresh_gl_status()
 
     def on_select(event=None) -> None:
         sel = listbox.curselection()
         if not sel:
             return
-        idx = sel[0]
+        idx = state["visible"][sel[0]]
         if idx == state["selected"]:
             return
         flush_form(state["selected"])
@@ -688,12 +745,11 @@ def build_ui(root: tk.Tk, config: dict) -> None:
             return
         state.update({
             "root_elem": root_elem, "games": games, "decl": decl, "selected": -1,
-            "dirty": {}, "deleted_paths": set(),
+            "dirty": {}, "deleted_paths": set(), "visible": list(range(len(games))),
         })
-        listbox.delete(0, "end")
-        for game in games:
-            display = get_field(game, "name") or get_field(game, "path") or "(不明)"
-            listbox.insert("end", display)
+        filter_title_var.set("")
+        filter_video_var.set("all")
+        apply_filter()
         path_label.config(text="")
         for widget in field_widgets.values():
             if isinstance(widget, tk.Text):
