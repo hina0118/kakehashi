@@ -1,11 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import {
-  PLAY_STATUSES, PLAY_STATUS_LABELS, api, doujinApi, type DoujinGame, type DoujinPatch, type PlayStatus,
+  PLAY_STATUSES, PLAY_STATUS_LABELS, STORE_LABELS, api, doujinApi,
+  type DoujinGame, type DoujinPatch, type PlayStatus, type WorkHit,
 } from '../../api'
 import { ErrorBox } from '../../components/ErrorBox'
 import { useRunJob } from '../../lib/jobs'
-import { DlsiteDialog, type DlsiteApply } from './DlsiteDialog'
+import { isFetchableStore, storeFromWorkId } from '../../lib/works'
+import { WorkInfoDialog, type WorkApply } from './WorkInfoDialog'
+import { WorkSearchDialog } from './WorkSearchDialog'
 import { DoujinImages } from './DoujinImages'
 import { SteamSection } from './SteamSection'
 import { TagInput } from './TagInput'
@@ -17,13 +20,9 @@ const FIELDS = [
   'play_status', 'rating', 'notes', 'local_path', 'exe', 'deck_dir', 'launch_options', 'compat_tool',
 ] as const
 
-const STORES = [
+const STORE_OPTIONS = [
   { value: '', label: '（未設定）' },
-  { value: 'dlsite', label: 'DLsite' },
-  { value: 'fanza', label: 'FANZA' },
-  { value: 'booth', label: 'BOOTH' },
-  { value: 'steam', label: 'Steam' },
-  { value: 'other', label: 'その他' },
+  ...['dlsite', 'fanza', 'fanza_games', 'dmm_games', 'booth', 'steam', 'other'].map((v) => ({ value: v, label: STORE_LABELS[v] })),
 ]
 
 function toDraft(g: DoujinGame): Draft {
@@ -52,7 +51,9 @@ export function DoujinDetail({ game, allTags, onSaved, onDeleted, onOpenSettings
   const [draft, setDraft] = useState<Draft>(() => toDraft(game))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<unknown>(null)
-  const [showDlsite, setShowDlsite] = useState(false)
+  // 作品情報を取得する対象（検索で選んだ直後は、まだ下書きに反映されていない値を使う）
+  const [fetchTarget, setFetchTarget] = useState<{ store: string; workId: string } | null>(null)
+  const [showSearch, setShowSearch] = useState(false)
   const [exeCandidates, setExeCandidates] = useState<string[] | null>(null)
   // サーバ側で値が変わったとき（転送で deck_dir が入った、画像を取り込んだ等）は、
   // ユーザーがまだ触っていない項目だけを新しい値に合わせる。そうしないと古い値を自動保存で書き戻してしまう。
@@ -112,7 +113,7 @@ export function DoujinDetail({ game, allTags, onSaved, onDeleted, onOpenSettings
     if (path) set('local_path', path)
   }
 
-  async function applyDlsite(a: DlsiteApply) {
+  async function applyWork(a: WorkApply) {
     setDraft((d) => ({ ...d, ...a.fields, tags: a.addTags.length ? [...new Set([...d.tags, ...a.addTags])] : d.tags }))
     if (a.coverUrl) {
       try {
@@ -134,7 +135,18 @@ export function DoujinDetail({ game, allTags, onSaved, onDeleted, onOpenSettings
     }
   }
 
-  const isDlsite = /^(RJ|RE|VJ|BJ)\d{6,8}$/i.test(draft.work_id.trim())
+  const canFetch = isFetchableStore(draft.store) && !!draft.work_id.trim()
+
+  function changeWorkId(value: string) {
+    // 作品IDの形式から販売サイトが決まるときは合わせる（PCゲームの作品IDはサイトを選んでもらう）
+    const store = storeFromWorkId(value)
+    setDraft((d) => ({ ...d, work_id: value, store: store ?? d.store }))
+  }
+
+  function selectHit(hit: WorkHit) {
+    setDraft((d) => ({ ...d, store: hit.store, work_id: hit.work_id, url: d.url || hit.url }))
+    setFetchTarget({ store: hit.store, workId: hit.work_id })
+  }
 
   return (
     <section className="editor doujin-detail">
@@ -191,15 +203,21 @@ export function DoujinDetail({ game, allTags, onSaved, onDeleted, onOpenSettings
           <label className="field">
             <span className="field-label">販売サイト</span>
             <select value={draft.store} onChange={(e) => set('store', e.target.value)}>
-              {STORES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+              {STORE_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
           </label>
           <label className="field grow">
             <span className="field-label">作品ID</span>
             <span className="input-with-btn">
-              <input value={draft.work_id} placeholder="RJ01234567 / d_123456" onChange={(e) => set('work_id', e.target.value)} />
-              <button className="btn small" disabled={!isDlsite} title={isDlsite ? undefined : 'DLsiteの作品ID（RJ…）を入力すると使えます'} onClick={() => setShowDlsite(true)}>
-                DLsiteから取得
+              <input value={draft.work_id} placeholder="RJ01234567 / d_123456 / aman_0937" onChange={(e) => changeWorkId(e.target.value)} />
+              <button className="btn small" onClick={() => setShowSearch(true)}>作品を検索</button>
+              <button
+                className="btn small"
+                disabled={!canFetch}
+                title={canFetch ? undefined : '販売サイト（DLsite・FANZA同人・FANZA GAMES・DMM GAMES）と作品IDを設定すると使えます'}
+                onClick={() => setFetchTarget({ store: draft.store, workId: draft.work_id.trim() })}
+              >
+                作品情報を取得
               </button>
             </span>
           </label>
@@ -264,8 +282,18 @@ export function DoujinDetail({ game, allTags, onSaved, onDeleted, onOpenSettings
         dirty={!!pendingKeys || saving}
       />
 
-      {showDlsite && (
-        <DlsiteDialog workId={draft.work_id.trim()} current={draft} hasCover={!!game.images.cover} onApply={applyDlsite} onClose={() => setShowDlsite(false)} />
+      {showSearch && (
+        <WorkSearchDialog title={draft.title} onSelect={selectHit} onClose={() => setShowSearch(false)} />
+      )}
+      {fetchTarget && (
+        <WorkInfoDialog
+          store={fetchTarget.store}
+          workId={fetchTarget.workId}
+          current={draft}
+          hasCover={!!game.images.cover}
+          onApply={applyWork}
+          onClose={() => setFetchTarget(null)}
+        />
       )}
     </section>
   )

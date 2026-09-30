@@ -221,7 +221,20 @@ export type DeckFolder = {
   linked_id: number | null
   match_id: number | null
 }
-export type DlsiteInfo = {
+export const STORES = ['dlsite', 'fanza', 'fanza_games', 'dmm_games'] as const
+export type StoreId = (typeof STORES)[number]
+export const STORE_LABELS: Record<string, string> = {
+  dlsite: 'DLsite',
+  fanza: 'FANZA同人',
+  fanza_games: 'FANZA GAMES',
+  dmm_games: 'DMM GAMES',
+  booth: 'BOOTH',
+  steam: 'Steam',
+  other: 'その他',
+}
+
+export type WorkInfo = {
+  store: StoreId
   work_id: string
   title: string
   circle: string
@@ -231,6 +244,16 @@ export type DlsiteInfo = {
   url: string
   work_type: string
 }
+export type WorkHit = {
+  store: StoreId
+  work_id: string
+  title: string
+  circle: string
+  image_url: string
+  url: string
+  kind: string
+}
+export type WorkSearchResult = { hits: WorkHit[]; errors: Record<string, string> }
 
 const dj = (id: number) => `/api/doujin/games/${id}`
 
@@ -258,7 +281,10 @@ export const doujinApi = {
     post<DoujinGame>(`${dj(id)}/images/${kind}/import-url`, { url }),
   deleteImage: (id: number, kind: DoujinImageKind) =>
     request<DoujinGame>(`${dj(id)}/images/${kind}`, { method: 'DELETE' }),
-  dlsite: (workId: string) => request<DlsiteInfo>(`/api/doujin/dlsite/${encodeURIComponent(workId)}`),
+  fetchWork: (store: string, workId: string) =>
+    request<WorkInfo>(`/api/doujin/works/${encodeURIComponent(store)}/${encodeURIComponent(workId)}`),
+  searchWorks: (q: string, stores: string[]) =>
+    request<WorkSearchResult>(`/api/doujin/works/search?${new URLSearchParams({ q, stores: stores.join(',') })}`),
   transfer: (id: number, base: string | null, overwrite = false) =>
     post<JobView<{ deck_dir: string; transferred: number; skipped: number; errors: string[] }>>(
       `${dj(id)}/transfer`, { base, overwrite },

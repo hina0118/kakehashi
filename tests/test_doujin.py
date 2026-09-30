@@ -175,6 +175,7 @@ def test_dlsite_fetch_parses_api_and_page(monkeypatch):
 
     monkeypatch.setattr(dlsite, "_get", fake_get)
     info = dlsite.fetch("rj01234567")
+    assert info.store == "dlsite"
     assert (info.work_id, info.circle, info.release_date, info.genres) == (
         "RJ01234567", "サークル&B", "2024-05-01", ["ファンタジー", "RPG"],
     )

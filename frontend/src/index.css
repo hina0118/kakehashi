@@ -1417,6 +1417,93 @@ textarea {
   color: var(--danger);
 }
 
+.work-hits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+.work-hits li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.work-hit {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.work-hit:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.work-hit-image {
+  width: 72px;
+  height: 54px;
+  flex-shrink: 0;
+  background: var(--surface-2);
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.work-hit-image img {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.work-hit-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.work-hit-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-hit-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.badge.store-dlsite {
+  color: #1f5fbf;
+}
+
+.badge.store-fanza,
+.badge.store-fanza_games {
+  color: #c2185b;
+}
+
+.badge.store-dmm_games {
+  color: #2e7d4f;
+}
+
 .plain-list {
   margin: 0;
   padding-left: 18px;

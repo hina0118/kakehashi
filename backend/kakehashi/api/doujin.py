@@ -8,8 +8,8 @@ from pydantic import BaseModel
 
 from kakehashi.api.deps import Ctx
 from kakehashi.domain.doujin import DoujinGame, DoujinPatch
-from kakehashi.infra.dlsite import DlsiteInfo
-from kakehashi.services.doujin import DeckFolder, FolderCandidate
+from kakehashi.domain.works import WorkInfo
+from kakehashi.services.doujin import DeckFolder, FolderCandidate, SearchResult
 from kakehashi.services.jobs import JobView
 from kakehashi.services.media import image_thumbnail
 
@@ -99,11 +99,16 @@ def delete_image(ctx: Ctx, game_id: int, kind: str) -> DoujinGame:
     return ctx.doujin.delete_image(game_id, kind)
 
 
-# ---- DLsite ----
+# ---- 販売サイト ----
 
-@router.get("/dlsite/{work_id}")
-def dlsite(ctx: Ctx, work_id: str) -> DlsiteInfo:
-    return ctx.doujin.fetch_dlsite(work_id)
+@router.get("/works/{store}/{work_id}")
+def fetch_work(ctx: Ctx, store: str, work_id: str) -> WorkInfo:
+    return ctx.doujin.fetch_work(store, work_id)
+
+
+@router.get("/works/search")
+def search_works(ctx: Ctx, q: str, stores: str = "") -> SearchResult:
+    return ctx.doujin.search_works(q, [s for s in stores.split(",") if s] or None)
 
 
 # ---- Steam Deck ----

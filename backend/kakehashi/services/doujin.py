@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Callable
@@ -16,7 +17,8 @@ from kakehashi.domain.doujin import (
 )
 from kakehashi.domain.media import IMAGE_SUFFIXES
 from kakehashi.errors import NotFoundError
-from kakehashi.infra import dlsite, downloader
+from kakehashi.domain.works import WorkHit, WorkInfo
+from kakehashi.infra import dlsite, dmm, downloader
 from kakehashi.infra.deck import DeckConnector
 from kakehashi.infra.doujin_db import DoujinDB
 from kakehashi.services.jobs import Job
@@ -27,6 +29,12 @@ class FolderCandidate(BaseModel):
     name: str
     guess: FolderGuess
     registered_id: int | None = None
+
+
+class SearchResult(BaseModel):
+    hits: list[WorkHit] = []
+    errors: dict[str, str] = {}
+    """販売サイトごとの検索エラー"""
 
 
 class DeckFolder(BaseModel):
@@ -179,8 +187,38 @@ class DoujinService:
 
     # ---- DLsite ----
 
-    def fetch_dlsite(self, work_id: str) -> dlsite.DlsiteInfo:
-        return dlsite.fetch(work_id)
+    def fetch_work(self, store: str, work_id: str) -> WorkInfo:
+        """販売サイトの作品ページから作品情報を取得する。"""
+        work_id = work_id.strip()
+        if store == "dlsite":
+            return dlsite.fetch(work_id)
+        if store == "fanza":
+            return dmm.fetch_doujin(work_id)
+        if store in ("fanza_games", "dmm_games"):
+            return dmm.fetch_pcgame(work_id, store)
+        raise ValueError(f"作品情報を取得できない販売サイトです: {store or '（未設定）'}")
+
+    def search_works(self, keyword: str, stores: list[str] | None = None) -> SearchResult:
+        """タイトルで各販売サイトを並行して検索する。失敗したサイトはエラーとして返し、他の結果は返す。"""
+        keyword = keyword.strip()
+        if not keyword:
+            raise ValueError("検索する言葉を入力してください。")
+        searchers = {
+            "dlsite": lambda: dlsite.search(keyword),
+            "fanza": lambda: dmm.search_doujin(keyword),
+            "fanza_games": lambda: dmm.search_pcgame(keyword, "fanza_games"),
+            "dmm_games": lambda: dmm.search_pcgame(keyword, "dmm_games"),
+        }
+        targets = [s for s in (stores or list(searchers)) if s in searchers]
+        result = SearchResult()
+        with ThreadPoolExecutor(max_workers=len(targets) or 1) as pool:
+            futures = {s: pool.submit(searchers[s]) for s in targets}
+            for store, fut in futures.items():
+                try:
+                    result.hits.extend(fut.result())
+                except Exception as e:
+                    result.errors[store] = str(e) or type(e).__name__
+        return result
 
     # ---- Steam Deck ----
 

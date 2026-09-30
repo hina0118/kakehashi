@@ -150,9 +150,24 @@ def update_doujin(updates: list[dict]) -> dict:
 
 
 @mcp.tool()
-def fetch_dlsite(work_id: str) -> dict:
-    """DLsiteの作品ID（RJ01234567 など）から、タイトル・サークル・発売日・ジャンル・画像URLを取得する。"""
-    return _ctx.doujin.fetch_dlsite(work_id).model_dump()
+def fetch_work(store: str, work_id: str) -> dict:
+    """販売サイトの作品IDから、タイトル・サークル・発売日・ジャンル・画像URLを取得する。
+
+    store: dlsite（RJ01234567 など） / fanza（FANZA同人。d_123456） /
+           fanza_games（FANZA GAMES のPCゲーム。aman_0937 など） / dmm_games（DMM GAMES のPCゲーム）
+    """
+    return _ctx.doujin.fetch_work(store, work_id).model_dump()
+
+
+@mcp.tool()
+def search_works(keyword: str, stores: list[str] | None = None) -> dict:
+    """タイトルやサークル名で販売サイトを検索し、作品IDの候補を返す。
+
+    stores: 検索するサイト（dlsite / fanza / fanza_games / dmm_games）。省略時はすべて。
+    戻り値: {"hits": [{"store", "work_id", "title", "circle", "kind", "url"}, ...], "errors": {サイト: エラー}}
+    台帳の作品に work_id と store を設定するには update_doujin を使う。
+    """
+    return _ctx.doujin.search_works(keyword, stores).model_dump()
 
 
 def run() -> None:

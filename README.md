@@ -29,13 +29,16 @@ PC で Web サーバを起動し、ブラウザで操作します。Deck へは 
 - 台帳（PC 上の SQLite）で管理: タイトル・サークル・作品ID・販売サイト・タグ・説明・発売日・プレイ状況・評価・メモ・起動ファイル
 - 登録方法: フォルダを1つ登録 / 作品フォルダが並んだ親フォルダからまとめて登録 / Deck に置いてある作品を取り込む
   - フォルダ名から作品ID（`RJ…` / `d_…`）・サークル（`[サークル] タイトル` 形式）・タイトルを推定し、起動ファイルの候補を選ぶ
-- DLsite の作品IDから、タイトル・サークル・発売日・ジャンル・カバー画像を取得
+- 販売サイト（DLsite / FANZA同人 / FANZA GAMES / DMM GAMES）をタイトルで検索して作品を選び、タイトル・サークル（ブランド）・発売日・ジャンル・カバー画像を取得
+  - 作品IDの形式: DLsite `RJ01234567`、FANZA同人 `d_123456`、FANZA GAMES・DMM GAMES `aman_0937` など
+  - DMM の各サイトは作品ページから読み取るため、ページの構成が変わると取得できなくなることがあります
 - Deck への転送（2回目以降は変わったファイルだけ）
+- Steam に登録済みの非Steamゲームの取り込み（appID・Proton・起動オプションを引き継ぐ）
 - **Steam への登録**: Deck の Steam に非Steamゲームとして登録し、ライブラリ画像（カバー・ヘッダー・ヒーロー・ロゴ・アイコン）と Proton の設定も書き込む
 
 ### AI エージェントとの連携（MCP）
 
-gamelist の参照・編集、プレイ動画の登録、同人台帳の参照・編集、DLsite の作品情報取得を MCP ツールとして公開しています（[MCP サーバ](#mcp-サーバ)）。
+gamelist の参照・編集、プレイ動画の登録、同人台帳の参照・編集、販売サイトの検索と作品情報取得を MCP ツールとして公開しています（[MCP サーバ](#mcp-サーバ)）。
 
 ---
 
@@ -125,7 +128,7 @@ Claude などの MCP クライアントに、次のように登録します（�
 | `list_systems` / `list_games` / `get_games` / `update_games` | ES-DE の機種・ゲーム一覧とメタデータの参照・更新 |
 | `check_videos` / `update_videos` | プレイ動画の有無の確認と、URL（yt-dlp）・ファイルからの登録・削除 |
 | `list_doujin` / `get_doujin` / `update_doujin` | 同人台帳の参照・更新 |
-| `fetch_dlsite` | DLsite の作品情報の取得 |
+| `search_works` / `fetch_work` | 販売サイト（DLsite / FANZA同人 / FANZA GAMES / DMM GAMES）の検索と作品情報の取得 |
 
 ---
 

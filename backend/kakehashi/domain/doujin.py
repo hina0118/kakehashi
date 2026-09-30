@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from kakehashi.domain.works import work_url
+
 PlayStatus = Literal["unplayed", "playing", "cleared", "completed", "onhold"]
 
 # Steamのライブラリ画像に対応する種類（Phase 4でそのまま使う）
@@ -122,14 +124,6 @@ def guess_from_folder_name(name: str) -> FolderGuess:
     return FolderGuess(
         title=rest or name, circle=circle, work_id=work_id, store=store, url=work_url(work_id, store),
     )
-
-
-def work_url(work_id: str, store: str) -> str:
-    if store == "dlsite" and work_id:
-        return f"https://www.dlsite.com/maniax/work/=/product_id/{work_id}.html"
-    if store == "fanza" and work_id:
-        return f"https://www.dmm.co.jp/dc/doujin/-/detail/=/cid={work_id}/"
-    return ""
 
 
 # 起動ファイルの候補から除外する名前（アンインストーラ・ランタイム・設定ツールなど）
