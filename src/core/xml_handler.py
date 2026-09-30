@@ -42,6 +42,22 @@ def set_field(game: ET.Element, key: str, value: str) -> None:
             game.remove(el)
 
 
+def add_placeholder_games(gamelist_elem: ET.Element, games: list[ET.Element], names: list[str]) -> None:
+    """ROMファイル名一覧について、pathのみ設定した空の<game>要素をgamesに追加する。
+
+    既にgames中にpathが存在する名前はスキップする（games自体もその場で追記される）。
+    """
+    known_paths = {get_field(g, "path") for g in games}
+    for name in names:
+        path_val = f"./{name}"
+        if path_val in known_paths:
+            continue
+        game = ET.SubElement(gamelist_elem, "game")
+        set_field(game, "path", path_val)
+        games.append(game)
+        known_paths.add(path_val)
+
+
 def serialize_gamelist(root_elem: ET.Element, decl: str) -> str:
     parts = [decl]
     for child in root_elem:
@@ -83,7 +99,12 @@ def merge_gamelist_diff(
             continue
         game = by_path.get(path_val)
         if game is None:
-            continue
+            if gamelist is None:
+                continue
+            # リモートにまだ存在しない新規ROM分のエントリ（空タグから編集された分）を追加する。
+            game = ET.SubElement(gamelist, "game")
+            set_field(game, "path", path_val)
+            by_path[path_val] = game
         for key, value in fields.items():
             set_field(game, key, value)
         applied_count += 1

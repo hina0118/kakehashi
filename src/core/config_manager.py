@@ -58,3 +58,17 @@ def resolve_remote_gamelist_path(config: dict, system: str) -> str:
         "gamelist_base", "/home/deck/.emulationstation/gamelists"
     )
     return f"{base}/{system}/gamelist.xml"
+
+
+def resolve_remote_rom_path(config: dict, system: str) -> str:
+    """Steam Deck上のROMフォルダのリモートパスを組み立てる。"""
+    base = config.get("steam_deck", {}).get(
+        "rom_base", "/run/media/mmcblk0p1/Emulation/roms"
+    )
+    return f"{base.rstrip('/')}/{system}"
+
+
+def resolve_remote_doujin_paths(config: dict) -> list[str]:
+    """Steam Deck上の同人ゲーム格納フォルダのリモートベースパス一覧を返す（複数指定可）。"""
+    bases = config.get("steam_deck", {}).get("doujin_base", [])
+    return [b.rstrip("/") for b in bases if b]

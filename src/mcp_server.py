@@ -9,9 +9,10 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from src.core.config_manager import (
-    load_config, discover_systems, resolve_remote_gamelist_path, resolve_paths,
+    load_config, discover_systems, resolve_remote_gamelist_path, resolve_remote_rom_path,
+    resolve_paths,
 )
-from src.core.sync_manager import fetch_remote_text, push_gamelist_diff
+from src.core.sync_manager import fetch_remote_text, push_gamelist_diff, scan_remote_new_roms
 from src.core.xml_handler import parse_gamelist_content, get_field
 from src.media.processor import get_rom_stem, download_video_via_ytdlp
 
@@ -52,13 +53,36 @@ def list_systems() -> list[str]:
 
 
 @mcp.tool()
-def list_games(system: str) -> list[dict]:
-    """指定した機種のgamelist.xmlから、各ゲームのpathとnameの一覧を取得する。"""
+def list_games(system: str, include_new_roms: bool = False) -> list[dict]:
+    """指定した機種のgamelist.xmlから、各ゲームのpathとnameの一覧を取得する。
+
+    include_new_roms: Trueにすると、リモートROMフォルダを走査してgamelist.xml
+    未登録のROMファイルも合わせて返す（registered: falseで区別、nameは空）。
+    ROMフォルダ直下のmetadata.txtに "extensions:" 行があればその拡張子で絞り込む。
+    未登録分はまだ保存されていないため、登録するにはupdate_gamesを呼ぶ必要がある。
+    """
     games = _fetch_games(system)
-    return [
-        {"path": get_field(g, "path"), "name": get_field(g, "name")}
+    result = [
+        {"path": get_field(g, "path"), "name": get_field(g, "name"), "registered": True}
         for g in games
     ]
+
+    if include_new_roms:
+        config = load_config()
+        conn = _sync_conn(config)
+        known_names = {Path(get_field(g, "path")).name for g in games if get_field(g, "path")}
+        new_names = scan_remote_new_roms(
+            host=conn["host"], port=conn["port"],
+            username=conn["username"], password=conn["password"],
+            remote_rom_dir=resolve_remote_rom_path(config, system),
+            known_names=known_names,
+        )
+        result.extend(
+            {"path": f"./{name}", "name": "", "registered": False}
+            for name in new_names
+        )
+
+    return result
 
 
 @mcp.tool()

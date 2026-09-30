@@ -15,14 +15,15 @@ except ImportError:
 
 from src.core.config_manager import (
     CONFIG_PATH, MEDIA_FOLDERS, IMAGE_SUFFIXES, VIDEO_SUFFIXES, THUMB_W, THUMB_H,
-    discover_systems, resolve_paths, resolve_remote_gamelist_path,
+    discover_systems, resolve_paths, resolve_remote_gamelist_path, resolve_remote_rom_path,
+    resolve_remote_doujin_paths,
 )
 from src.core.xml_handler import (
-    parse_gamelist_content, get_field, set_field,
+    parse_gamelist_content, get_field, set_field, add_placeholder_games,
 )
 from src.core.sync_manager import (
     _PARAMIKO_OK, test_connection, transfer_files, pull_files,
-    fetch_remote_text, push_gamelist_diff,
+    fetch_remote_text, push_gamelist_diff, scan_remote_new_roms, collect_local_files,
 )
 from src.media.processor import (
     get_rom_stem, find_media_files,
@@ -48,6 +49,8 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     btn_media_check.pack(side="right", padx=(4, 8), pady=5)
     btn_sync = tk.Button(topbar, text="同期", font=("Arial", 9))
     btn_sync.pack(side="right", padx=(4, 0), pady=5)
+    btn_doujin = tk.Button(topbar, text="同人ゲーム転送", font=("Arial", 9))
+    btn_doujin.pack(side="right", padx=(4, 0), pady=5)
     btn_push = tk.Button(
         topbar, text="プッシュ", font=("Arial", 9, "bold"),
         bg="#0066cc", fg="white", activebackground="#0055aa", relief="flat",
@@ -99,7 +102,12 @@ def build_ui(root: tk.Tk, config: dict) -> None:
     # ── 左ペイン：ゲーム一覧 ────────────────────────────────
     left_frame = tk.Frame(paned, bg="white")
     paned.add(left_frame, minsize=160, width=240)
-    tk.Label(left_frame, text="ゲーム一覧", font=("Arial", 9, "bold"), bg="white", anchor="w").pack(fill="x", padx=8, pady=(8, 4))
+
+    list_header_row = tk.Frame(left_frame, bg="white")
+    list_header_row.pack(fill="x", padx=8, pady=(8, 4))
+    tk.Label(list_header_row, text="ゲーム一覧", font=("Arial", 9, "bold"), bg="white", anchor="w").pack(side="left")
+    btn_add_rom = tk.Button(list_header_row, text="+ ROM追加", font=("Arial", 8))
+    btn_add_rom.pack(side="right")
 
     # フィルター（タイトル検索・動画の有無）
     filter_frame = tk.Frame(left_frame, bg="white")
@@ -328,6 +336,63 @@ def build_ui(root: tk.Tk, config: dict) -> None:
         ).pack(side="left")
         sync_conn_label = tk.Label(conn_status_row, text="", font=("Arial", 9))
         sync_conn_label.pack(side="left", padx=(12, 0))
+
+        tk.Frame(content, height=1, bg="#eeeeee").pack(fill="x", pady=(12, 8))
+
+        # ── 同人ゲーム格納先（複数指定可） ─────────────────────
+        tk.Label(content, text="同人ゲーム格納先 (Steam Deck) — 複数指定可", font=("Arial", 9, "bold"), anchor="w").pack(fill="x")
+        tk.Frame(content, height=1, bg="#eeeeee").pack(fill="x", pady=(4, 8))
+
+        doujin_list_row = tk.Frame(content)
+        doujin_list_row.pack(fill="x")
+
+        doujin_listbox = tk.Listbox(doujin_list_row, height=4, font=("Arial", 9))
+        doujin_listbox.pack(side="left", fill="both", expand=True)
+        for _p in config.get("steam_deck", {}).get("doujin_base", []):
+            doujin_listbox.insert("end", _p)
+
+        def _doujin_remove_selected() -> None:
+            sel = doujin_listbox.curselection()
+            if sel:
+                doujin_listbox.delete(sel[0])
+
+        tk.Button(
+            doujin_list_row, text="削除", font=("Arial", 8), command=_doujin_remove_selected,
+        ).pack(side="left", padx=(6, 0), anchor="n")
+
+        doujin_add_row = tk.Frame(content)
+        doujin_add_row.pack(fill="x", pady=(4, 0))
+        doujin_new_var = tk.StringVar()
+        tk.Entry(doujin_add_row, textvariable=doujin_new_var, font=("Arial", 9)).pack(
+            side="left", fill="x", expand=True
+        )
+
+        def _doujin_add() -> None:
+            val = doujin_new_var.get().strip()
+            if val:
+                doujin_listbox.insert("end", val)
+                doujin_new_var.set("")
+
+        tk.Button(doujin_add_row, text="追加", font=("Arial", 8), command=_doujin_add).pack(
+            side="left", padx=(6, 0)
+        )
+
+        def _save_doujin_base() -> None:
+            config.setdefault("steam_deck", {})
+            config["steam_deck"]["doujin_base"] = list(doujin_listbox.get(0, "end"))
+            try:
+                CONFIG_PATH.write_text(
+                    json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                doujin_save_label.config(text="✓ 保存しました", fg="#009900")
+            except Exception as e:
+                messagebox.showerror("保存エラー", str(e))
+
+        doujin_save_row = tk.Frame(content)
+        doujin_save_row.pack(fill="x", pady=(6, 0))
+        tk.Button(doujin_save_row, text="保存", font=("Arial", 9), command=_save_doujin_base).pack(side="left")
+        doujin_save_label = tk.Label(doujin_save_row, text="", font=("Arial", 9))
+        doujin_save_label.pack(side="left", padx=(8, 0))
 
         tk.Frame(content, height=1, bg="#eeeeee").pack(fill="x", pady=(12, 8))
 
@@ -743,6 +808,25 @@ def build_ui(root: tk.Tk, config: dict) -> None:
         except ET.ParseError as e:
             messagebox.showerror("XMLエラー", f"XMLのパースに失敗しました:\n{e}")
             return
+
+        # リモートROMフォルダに、gamelist.xml未登録の新規ファイルがあれば
+        # pathのみ設定した空エントリを追加し、その場で編集できるようにする。
+        gamelist_elem = root_elem.find("gameList")
+        if gamelist_elem is not None:
+            known_names = {Path(get_field(g, "path")).name for g in games if get_field(g, "path")}
+            try:
+                new_names = scan_remote_new_roms(
+                    host=host,
+                    port=int(sync_port_var.get() or 22),
+                    username=sync_user_var.get(),
+                    password=sync_pass_var.get(),
+                    remote_rom_dir=resolve_remote_rom_path(config, system_var.get()),
+                    known_names=known_names,
+                )
+            except Exception:
+                new_names = []
+            add_placeholder_games(gamelist_elem, games, new_names)
+
         state.update({
             "root_elem": root_elem, "games": games, "decl": decl, "selected": -1,
             "dirty": {}, "deleted_paths": set(), "visible": list(range(len(games))),
@@ -835,8 +919,212 @@ def build_ui(root: tk.Tk, config: dict) -> None:
 
         threading.Thread(target=_do, daemon=True).start()
 
+    def _do_add_rom() -> None:
+        if not _PARAMIKO_OK:
+            messagebox.showwarning(
+                "paramiko未インストール",
+                "ROM追加にはSteam DeckへのSSH接続が必要です。\npip install paramiko を実行してください。",
+            )
+            return
+        host = sync_host_var.get().strip()
+        if not host:
+            messagebox.showwarning("設定エラー", "「同期」画面でホスト（Steam DeckのIPアドレス）を設定してください。")
+            return
+        if state["root_elem"] is None:
+            messagebox.showwarning("読み込みエラー", "先にgamelist.xmlを読み込んでください。")
+            return
+
+        srcs = filedialog.askopenfilenames(title="追加するROMファイルを選択")
+        if not srcs:
+            return
+        local_paths = [Path(s) for s in srcs]
+
+        system = system_var.get()
+        remote_rom_dir = resolve_remote_rom_path(config, system)
+        existing_names = {Path(get_field(g, "path")).name for g in state["games"] if get_field(g, "path")}
+        dup = [p.name for p in local_paths if p.name in existing_names]
+
+        msg = f"転送先: {remote_rom_dir}/\n\n" + "\n".join(p.name for p in local_paths)
+        if dup:
+            msg += "\n\n※ 以下は既にgamelist.xmlへ登録済みの名前です:\n" + "\n".join(dup)
+        if not messagebox.askokcancel("ROM追加確認", msg):
+            return
+
+        tasks = [(p, f"{remote_rom_dir}/{p.name}") for p in local_paths]
+        port = int(sync_port_var.get() or 22)
+        username = sync_user_var.get()
+        password = sync_pass_var.get()
+
+        btn_add_rom.config(state="disabled", text="転送中...")
+
+        def _do() -> None:
+            try:
+                ok, skipped, errors = transfer_files(
+                    host=host, port=port, username=username, password=password,
+                    tasks=tasks, overwrite=False, on_log=print, on_progress=lambda v: None,
+                )
+
+                def _finish() -> None:
+                    gamelist_elem = state["root_elem"].find("gameList") if state["root_elem"] is not None else None
+                    if gamelist_elem is not None and ok + skipped > 0:
+                        add_placeholder_games(gamelist_elem, state["games"], [p.name for p in local_paths])
+                        apply_filter()
+                        _refresh_gl_status()
+                    if errors == 0:
+                        messagebox.showinfo(
+                            "ROM追加完了",
+                            f"転送{ok} / スキップ{skipped}件\n"
+                            "gamelist.xmlへ反映するには、対象ゲームを選択して情報を入力後「プッシュ」してください。",
+                        )
+                    else:
+                        messagebox.showwarning("ROM追加（一部エラーあり）", f"転送{ok} / スキップ{skipped} / エラー{errors}")
+                    btn_add_rom.config(state="normal", text="+ ROM追加")
+
+                root.after(0, _finish)
+            except Exception as ex:
+                def _fail() -> None:
+                    messagebox.showerror("ROM追加エラー", str(ex))
+                    btn_add_rom.config(state="normal", text="+ ROM追加")
+                root.after(0, _fail)
+
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _prompt_doujin_confirm(local_dir: Path, bases: list[str], file_count: int) -> tuple[str, bool] | None:
+        """転送先フォルダ（複数候補から選択）と上書き有無を確認するダイアログ。キャンセル時はNone。"""
+        result: dict = {}
+
+        dlg = tk.Toplevel(root)
+        dlg.title("同人ゲーム転送確認")
+        dlg.geometry("480x280")
+        dlg.transient(root)
+        dlg.grab_set()
+
+        frame = tk.Frame(dlg)
+        frame.pack(fill="both", expand=True, padx=14, pady=12)
+
+        tk.Label(
+            frame, text=f"転送元: {local_dir}", font=("Arial", 9),
+            anchor="w", justify="left", wraplength=440,
+        ).pack(fill="x")
+        tk.Label(frame, text=f"ファイル数: {file_count}", font=("Arial", 9), anchor="w").pack(
+            fill="x", pady=(2, 8)
+        )
+
+        tk.Label(frame, text="転送先フォルダ:", font=("Arial", 9, "bold"), anchor="w").pack(fill="x")
+        base_var = tk.StringVar(value=bases[0])
+        ttk.Combobox(
+            frame, textvariable=base_var, values=bases, state="readonly", font=("Arial", 9),
+        ).pack(fill="x", pady=(2, 8))
+
+        dest_label = tk.Label(
+            frame, text="", font=("Arial", 9), fg="#666", anchor="w", justify="left", wraplength=440,
+        )
+        dest_label.pack(fill="x")
+
+        def _update_dest_label(*_a) -> None:
+            dest_label.config(text=f"→ {base_var.get()}/{local_dir.name}/")
+
+        base_var.trace_add("write", _update_dest_label)
+        _update_dest_label()
+
+        overwrite_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            frame, text="常に上書き（同名・同サイズのファイルも再転送する）",
+            variable=overwrite_var, font=("Arial", 9),
+        ).pack(fill="x", pady=(10, 0), anchor="w")
+
+        tk.Label(
+            frame, text="※ ローカルで削除したファイルはリモートに残ります",
+            font=("Arial", 8), fg="#888", anchor="w",
+        ).pack(fill="x", pady=(4, 0))
+
+        btn_row = tk.Frame(frame)
+        btn_row.pack(fill="x", pady=(12, 0), side="bottom")
+
+        def _ok() -> None:
+            result["base"] = base_var.get()
+            result["overwrite"] = overwrite_var.get()
+            dlg.destroy()
+
+        tk.Button(btn_row, text="転送実行", font=("Arial", 9), width=12, command=_ok).pack(side="right")
+        tk.Button(btn_row, text="キャンセル", font=("Arial", 9), width=10, command=dlg.destroy).pack(
+            side="right", padx=(0, 6)
+        )
+
+        dlg.wait_window()
+        if "base" not in result:
+            return None
+        return result["base"], result["overwrite"]
+
+    def _do_add_doujin() -> None:
+        if not _PARAMIKO_OK:
+            messagebox.showwarning(
+                "paramiko未インストール",
+                "同人ゲーム転送にはSteam DeckへのSSH接続が必要です。\npip install paramiko を実行してください。",
+            )
+            return
+        host = sync_host_var.get().strip()
+        if not host:
+            messagebox.showwarning("設定エラー", "「同期」画面でホスト（Steam DeckのIPアドレス）を設定してください。")
+            return
+        bases = resolve_remote_doujin_paths(config)
+        if not bases:
+            messagebox.showwarning("設定エラー", "「同期」画面で同人ゲーム格納先を設定してください。")
+            return
+
+        src = filedialog.askdirectory(title="転送する同人ゲームのフォルダを選択")
+        if not src:
+            return
+        local_dir = Path(src)
+
+        # 転送先ベースパスは確認ダイアログで確定するため、いったん相対パス（先頭"/"付き）だけ集めておく。
+        rel_tasks = collect_local_files(local_dir, "")
+        if not rel_tasks:
+            messagebox.showinfo("同人ゲーム転送", "選択したフォルダにファイルがありません。")
+            return
+
+        confirmed = _prompt_doujin_confirm(local_dir, bases, len(rel_tasks))
+        if confirmed is None:
+            return
+        base, overwrite = confirmed
+
+        remote_dir = f"{base}/{local_dir.name}"
+        tasks = [(lp, f"{remote_dir}{rel}") for lp, rel in rel_tasks]
+
+        port = int(sync_port_var.get() or 22)
+        username = sync_user_var.get()
+        password = sync_pass_var.get()
+
+        btn_doujin.config(state="disabled", text="転送中...")
+
+        def _do() -> None:
+            try:
+                ok, skipped, errors = transfer_files(
+                    host=host, port=port, username=username, password=password,
+                    tasks=tasks, overwrite=overwrite, on_log=print, on_progress=lambda v: None,
+                )
+                summary = f"転送{ok} / スキップ{skipped} / エラー{errors}"
+
+                def _finish() -> None:
+                    if errors == 0:
+                        messagebox.showinfo("同人ゲーム転送完了", summary)
+                    else:
+                        messagebox.showwarning("同人ゲーム転送（一部エラーあり）", summary)
+                    btn_doujin.config(state="normal", text="同人ゲーム転送")
+
+                root.after(0, _finish)
+            except Exception as ex:
+                def _fail() -> None:
+                    messagebox.showerror("同人ゲーム転送エラー", str(ex))
+                    btn_doujin.config(state="normal", text="同人ゲーム転送")
+                root.after(0, _fail)
+
+        threading.Thread(target=_do, daemon=True).start()
+
     btn_media_check.config(
         command=lambda: open_media_check_window(root, config, system_var.get(), state["games"])
     )
     btn_push.config(command=_do_push)
+    btn_add_rom.config(command=_do_add_rom)
+    btn_doujin.config(command=_do_add_doujin)
     load_file()

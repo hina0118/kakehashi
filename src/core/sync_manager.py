@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import stat as _stat
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +41,20 @@ def test_connection(host: str, port: int, username: str, password: str) -> None:
         timeout=10, look_for_keys=False, allow_agent=False,
     )
     cl.close()
+
+
+def collect_local_files(local_dir: Path, remote_dir: str) -> list[tuple[Path, str]]:
+    """ローカルディレクトリを再帰的に走査し、(ローカルパス, リモートパス) の一覧を返す。
+
+    同人ゲームフォルダのように、フォルダ丸ごとを転送対象にする場合に使う。
+    transfer_files() の tasks 引数へそのまま渡せる形式で返す。
+    """
+    tasks: list[tuple[Path, str]] = []
+    for p in sorted(local_dir.rglob("*")):
+        if p.is_file():
+            rel = p.relative_to(local_dir).as_posix()
+            tasks.append((p, f"{remote_dir}/{rel}"))
+    return tasks
 
 
 def transfer_files(
@@ -117,6 +132,66 @@ def fetch_remote_text(host: str, port: int, username: str, password: str, remote
         sftp.close()
         cl.close()
     return content
+
+
+def _read_rom_extensions(sftp: "paramiko.SFTPClient", remote_rom_dir: str) -> set[str]:
+    """remote_rom_dir直下のmetadata.txtから "extensions:" 行を読み取り、拡張子集合を返す。
+
+    行が見つからない場合は空集合を返す（呼び出し側は全ファイルを対象にする）。
+    """
+    try:
+        with sftp.open(f"{remote_rom_dir}/metadata.txt", "r") as f:
+            content = f.read().decode("utf-8", errors="ignore")
+    except FileNotFoundError:
+        return set()
+
+    for line in content.splitlines():
+        m = re.match(r"\s*extensions\s*:\s*(.+)", line, re.IGNORECASE)
+        if m:
+            tokens = re.split(r"[,\s]+", m.group(1).strip())
+            return {(t if t.startswith(".") else f".{t}").lower() for t in tokens if t}
+    return set()
+
+
+def scan_remote_new_roms(
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    remote_rom_dir: str,
+    known_names: set[str],
+) -> list[str]:
+    """リモートROMフォルダを走査し、gamelist.xml未登録のファイル名一覧を返す。
+
+    remote_rom_dir直下のmetadata.txtに "extensions:" 行があれば、その拡張子で
+    対象を絞り込む（無ければ隠しファイル以外すべてを対象にする）。
+    known_names: 既にgamelist.xmlに登録済みのファイル名（basename）の集合。
+    """
+    cl = paramiko.SSHClient()
+    cl.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    cl.connect(
+        hostname=host, port=port, username=username, password=password,
+        timeout=15, look_for_keys=False, allow_agent=False,
+    )
+    sftp = cl.open_sftp()
+    try:
+        extensions = _read_rom_extensions(sftp, remote_rom_dir)
+        try:
+            entries = sftp.listdir(remote_rom_dir)
+        except FileNotFoundError:
+            entries = []
+    finally:
+        sftp.close()
+        cl.close()
+
+    new_names = []
+    for name in sorted(entries):
+        if name.startswith(".") or name == "metadata.txt" or name in known_names:
+            continue
+        if extensions and Path(name).suffix.lower() not in extensions:
+            continue
+        new_names.append(name)
+    return new_names
 
 
 def _prune_remote_backups(sftp: "paramiko.SFTPClient", remote_dir: str, name: str, backup_max: int) -> None:

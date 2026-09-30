@@ -19,7 +19,10 @@
   "steam_deck": {
     "rom_base": "/run/media/deck/SDCARD/Emulation/roms",
     "gamelist_base": "/home/deck/ES-DE/gamelists",
-    "media_base": "/run/media/deck/SDCARD/Emulation/tools/downloaded_media"
+    "media_base": "/run/media/deck/SDCARD/Emulation/tools/downloaded_media",
+    "doujin_base": [
+      "/run/media/deck/SDCARD/DoujinGames"
+    ]
   },
   "sync": {
     "host": "192.168.x.x",
