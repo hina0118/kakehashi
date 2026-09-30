@@ -43,11 +43,26 @@ tests/                 pytest
 | Phase | 内容 | 状態 |
 |---|---|---|
 | 0 | 骨格（FastAPI・Vite・設定・テスト基盤・起動コマンド） | 完了 |
-| 1 | ES-DE メタデータ：機種一覧、ゲーム一覧/検索、編集、差分プッシュ、未登録ROM検出、Web検索/翻訳リンク。MCP を新サービスへ移行 | 完了（動画ツールは Phase 2） |
-| 2 | メディア：存在チェック、サムネイル配信、3Dボックス・miximage・AIロゴ生成、動画（yt-dlp）、Deck へのメディア転送・ROM追加 | |
+| 1 | ES-DE メタデータ：機種一覧、ゲーム一覧/検索、編集、差分プッシュ、未登録ROM検出、Web検索/翻訳リンク。MCP を新サービスへ移行 | 完了 |
+| 2 | メディア：存在チェック、サムネイル配信、3Dボックス・miximage・AIロゴ生成、動画（yt-dlp）、Deck へのメディア転送・ROM追加 | 完了 |
 | 3 | 同人台帳：フォルダ登録、メタデータ編集（サークル・作品ID・タグ・プレイ状況・起動exe）、カバー画像、Deck への転送 | |
 | 4 | Steam 登録：`shortcuts.vdf`（バイナリVDF）への追加、appid 算出、グリッド画像、Proton 設定（`config.vdf` の CompatToolMapping）、Steam 起動中チェック | |
 | 5 | 旧 tkinter アプリ（`src/`）の削除、README 更新、main へマージ | |
+
+## メディアの扱い（Phase 2）
+
+- **正本はPC側の `windows.media_base`**。「Deckから取得」はPCに無いファイルだけを取り、PCで同じゲーム・同じ種類のファイルがあれば取得しない（PCでの編集を上書きしない）。
+- 削除・拡張子違いへの差し替えは `work/pending_media_deletions.json` に記録し、次の「Deckへプッシュ」でDeckからも削除する。記録中のファイルは取得の対象外にする（旧アプリでは削除したファイルが次の取得で復活していた）。
+- 「Deckへプッシュ」は、gamelist.xml の編集を反映したあと、フォルダごとの一覧でサイズを比べて変わったメディアだけを送る。
+- ファイル名は stem の完全一致で照合する（旧アプリの glob は `Game [USA]` のような名前を誤判定していた）。
+- 生成（3Dボックス・miximage・ロゴ切り出し・AIロゴ）は「プレビューを作る → 確認して保存」の2段階。プレビューはサーバのメモリに一時保持する。
+- ROMや画像ファイルは、サーバと同じPCのファイル選択ダイアログ（`/api/local/pick`）で選ぶ。数GBのROMをブラウザ経由でアップロードせずに済む。
+- 転送・動画取得・AIロゴ抽出はバックグラウンドジョブ（`/api/jobs`）で実行し、画面右下に進捗を出す。
+
+## ローカルサーバの保護
+
+- 更新系API（GET以外）は `X-Kakehashi: 1` ヘッダが必須。独自ヘッダはCORSのプリフライト対象になるため、他サイトのページからの操作（CSRF）を防げる。
+- Host ヘッダが `127.0.0.1` / `localhost` 以外のリクエストは拒否する（DNSリバインディング対策）。
 
 ## Steam 登録の注意点（Phase 4）
 
@@ -68,6 +83,6 @@ uv run kakehashi serve
 
 フロントエンドを開発するときは、`uv run kakehashi serve --no-browser --reload` と `npm --prefix frontend run dev` を並べて起動する（Vite が `/api` を 8765 番へ中継する）。
 
-MCP サーバは `uv run kakehashi mcp` で起動する。gamelist 系のツール（`list_systems` / `list_games` / `get_games` / `update_games`）は旧版（`src/mcp_server.py`）と同じ名前・引数で公開している。動画系のツール（`check_videos` / `update_videos`）は Phase 2 で移植するため、それまでは旧版を使う。
+MCP サーバは `uv run kakehashi mcp` で起動する。旧版（`src/mcp_server.py`）と同じ6つのツールを同じ名前・引数で公開しているため、登録先のコマンドを差し替えるだけで移行できる。
 
 テストは `uv run pytest`。Deck への接続はインメモリの偽実装に置き換えて実行する。

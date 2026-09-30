@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import posixpath
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
-from kakehashi.config import Config, DeckPaths, SyncSettings
+from kakehashi.config import Config, DeckPaths, LocalPaths, SyncSettings
 from kakehashi.context import AppContext
+from kakehashi.infra.deck import TransferResult
 
 
 class MemoryFS:
@@ -37,6 +39,36 @@ class MemoryFS:
 
     def remove(self, path: str) -> None:
         del self.files[path]
+
+    def list_files(self, path: str) -> dict[str, int]:
+        prefix = path.rstrip("/") + "/"
+        return {
+            p[len(prefix):]: len(c.encode("utf-8"))
+            for p, c in self.files.items() if p.startswith(prefix) and "/" not in p[len(prefix):]
+        }
+
+    def upload(self, tasks, overwrite=False, on_progress=None) -> TransferResult:
+        res = TransferResult()
+        for i, (local, remote) in enumerate(tasks, 1):
+            data = Path(local).read_text(encoding="utf-8")
+            if not overwrite and remote in self.files and len(self.files[remote].encode()) == len(data.encode()):
+                res.skipped += 1
+            else:
+                self.files[remote] = data
+                res.transferred += 1
+            if on_progress:
+                on_progress(i, len(tasks))
+        return res
+
+    def download(self, tasks, on_progress=None) -> TransferResult:
+        res = TransferResult()
+        for i, (remote, local) in enumerate(tasks, 1):
+            Path(local).parent.mkdir(parents=True, exist_ok=True)
+            Path(local).write_text(self.files[remote], encoding="utf-8")
+            res.transferred += 1
+            if on_progress:
+                on_progress(i, len(tasks))
+        return res
 
     @contextmanager
     def connect(self):
@@ -80,9 +112,11 @@ def deck_fs() -> MemoryFS:
 @pytest.fixture
 def ctx(deck_fs: MemoryFS, tmp_path, monkeypatch) -> AppContext:
     monkeypatch.setenv("KAKEHASHI_CONFIG_PATH", str(tmp_path / "config.json"))
+    monkeypatch.setenv("KAKEHASHI_DATA_DIR", str(tmp_path / "data"))
     config = Config(
         systems=["ps2"], backup_max=2,
-        steam_deck=DeckPaths(gamelist_base="/deck/gamelists", rom_base="/deck/roms"),
+        windows=LocalPaths(media_base=str(tmp_path / "media")),
+        steam_deck=DeckPaths(gamelist_base="/deck/gamelists", rom_base="/deck/roms", media_base="/deck/media"),
         sync=SyncSettings(host="deck.test", password="secret"),
     )
     c = AppContext(config)

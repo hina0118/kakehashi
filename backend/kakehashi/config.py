@@ -20,6 +20,14 @@ def config_path() -> Path:
     return Path(env) if env else _DEFAULT_CONFIG_PATH
 
 
+def data_dir() -> Path:
+    """kakehashiが作業データ（未反映の削除、同人台帳など）を置くフォルダ。"""
+    env = os.environ.get("KAKEHASHI_DATA_DIR")
+    d = Path(env) if env else PROJECT_ROOT / "work"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 class _Section(BaseModel):
     model_config = ConfigDict(extra="allow")
 

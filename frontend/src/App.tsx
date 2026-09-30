@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { JobTray } from './components/JobTray'
 import { EsdePage } from './features/esde/EsdePage'
 import { SettingsPage } from './features/settings/SettingsPage'
 
@@ -42,6 +43,7 @@ export default function App() {
           </div>
         )}
       </main>
+      <JobTray />
     </div>
   )
 }

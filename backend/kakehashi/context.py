@@ -4,9 +4,13 @@ from __future__ import annotations
 from contextlib import AbstractContextManager
 from functools import cached_property
 
-from kakehashi.config import Config, load_config, save_config
-from kakehashi.infra.deck import RemoteFS, open_deck
+from kakehashi.config import Config, data_dir, load_config, save_config
+from kakehashi.infra.deck import TransferFS, open_deck
+from kakehashi.infra.media_store import PendingDeletions
 from kakehashi.services.esde import EsdeService
+from kakehashi.services.jobs import JobManager
+from kakehashi.services.media import MediaService
+from kakehashi.services.previews import PreviewStore
 
 
 class AppContext:
@@ -21,9 +25,26 @@ class AppContext:
         save_config(config)
         self._config = config
 
-    def connect(self) -> AbstractContextManager[RemoteFS]:
+    def connect(self) -> AbstractContextManager[TransferFS]:
         return open_deck(self._config.sync)
+
+    # connect はテストで差し替えられるため、サービスには束縛済みメソッドではなく
+    # 呼び出し時に解決するラムダを渡す
+    def _connector(self):
+        return lambda: self.connect()
+
+    @cached_property
+    def jobs(self) -> JobManager:
+        return JobManager()
 
     @cached_property
     def esde(self) -> EsdeService:
-        return EsdeService(lambda: self._config, self.connect)
+        return EsdeService(lambda: self._config, self._connector())
+
+    @cached_property
+    def media(self) -> MediaService:
+        return MediaService(
+            lambda: self._config, self._connector(),
+            PendingDeletions(data_dir() / "pending_media_deletions.json"),
+            PreviewStore(),
+        )

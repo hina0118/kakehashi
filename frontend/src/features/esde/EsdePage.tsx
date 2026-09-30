@@ -1,7 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, api, type EsdeGame, type GameFields } from '../../api'
 import { ErrorBox } from '../../components/ErrorBox'
+import { romStem } from '../../lib/esde'
+import { useRunJob } from '../../lib/jobs'
+import { CoverageDialog } from '../media/CoverageDialog'
+import { MediaPanel } from '../media/MediaPanel'
 import { GameEditor } from './GameEditor'
 import { GameList } from './GameList'
 
@@ -26,6 +30,9 @@ export function EsdePage({ onOpenSettings }: { onOpenSettings: () => void }) {
   // 機種ごとの未プッシュの編集内容
   const [editsBySystem, setEditsBySystem] = useState<Record<string, Edits>>({})
   const [notice, setNotice] = useState<string | null>(null)
+  const [detailTab, setDetailTab] = useState<'meta' | 'media'>('meta')
+  const [showCoverage, setShowCoverage] = useState(false)
+  const runJob = useRunJob()
 
   const systemList = systems.data ?? []
   const current = systemList.includes(system) ? system : (systemList[0] ?? '')
@@ -57,24 +64,66 @@ export function EsdePage({ onOpenSettings }: { onOpenSettings: () => void }) {
     return () => window.removeEventListener('beforeunload', warn)
   }, [totalPending])
 
+  async function refreshMediaViews(sys: string) {
+    await qc.invalidateQueries({ queryKey: ['media', sys] })
+    await qc.invalidateQueries({ queryKey: ['coverage', sys] })
+  }
+
+  // メディアの同期はジョブトレイに進捗を出し、完了を待たずに操作を続けられるようにする
+  function startMediaSync(sys: string, direction: 'pull' | 'push') {
+    runJob(() => api.syncMedia(sys, direction))
+      .then(() => refreshMediaViews(sys))
+      .catch(() => { /* 失敗はジョブトレイに表示される */ })
+  }
+
+  // 機種を初めて開いたときに、Deckにだけあるメディアを取得しておく（旧アプリと同じ動き）
+  const autoPulled = useRef(new Set<string>())
+  useEffect(() => {
+    if (!current || !games.isSuccess || autoPulled.current.has(current)) return
+    autoPulled.current.add(current)
+    startMediaSync(current, 'pull')
+  })
+
   const pull = useMutation({
     mutationFn: () => api.games(current, { refresh: true }),
     onSuccess: (data) => {
       qc.setQueryData(['games', current], data)
       qc.invalidateQueries({ queryKey: ['unregistered', current] })
       setNotice('Deckから最新のgamelist.xmlを取得しました。')
+      startMediaSync(current, 'pull')
     },
   })
 
   const push = useMutation({
-    mutationFn: () =>
-      api.updateGames(current, Object.entries(edits).map(([path, fields]) => ({ path, fields }))),
+    mutationFn: async () => {
+      if (pendingCount === 0) return null
+      return api.updateGames(current, Object.entries(edits).map(([path, fields]) => ({ path, fields })))
+    },
     onSuccess: async (result) => {
-      setEditsBySystem((prev) => ({ ...prev, [current]: {} }))
-      // サーバ側のキャッシュは書き込み後の内容に更新済みなので、SSHなしで取り直せる
-      await qc.invalidateQueries({ queryKey: ['games', current] })
+      if (result) {
+        setEditsBySystem((prev) => ({ ...prev, [current]: {} }))
+        // サーバ側のキャッシュは書き込み後の内容に更新済みなので、SSHなしで取り直せる
+        await qc.invalidateQueries({ queryKey: ['games', current] })
+        await qc.invalidateQueries({ queryKey: ['unregistered', current] })
+        setNotice(`${result.applied}件をDeckのgamelist.xmlへ反映しました。メディアを送信しています…`)
+      } else {
+        setNotice('メディアを送信しています…')
+      }
+      startMediaSync(current, 'push')
+    },
+  })
+
+  const addRoms = useMutation({
+    mutationFn: async () => {
+      const files = await api.pickLocal('files', `${current} のROMファイルを選択`)
+      if (files.length === 0) return null
+      return runJob(() => api.uploadRoms(current, files))
+    },
+    onSuccess: async (result) => {
+      if (!result) return
+      setShowUnregistered(true)
       await qc.invalidateQueries({ queryKey: ['unregistered', current] })
-      setNotice(`${result.applied}件をDeckのgamelist.xmlへ反映しました。`)
+      setNotice(`ROMを${result.transferred}件送信しました（送信済み ${result.skipped}件）。一覧の「未登録」から登録できます。`)
     },
   })
 
@@ -116,7 +165,7 @@ export function EsdePage({ onOpenSettings }: { onOpenSettings: () => void }) {
   }
 
   const loadError = systems.error ?? games.error ?? (showUnregistered ? unregistered.error : null)
-  const actionError = pull.error ?? push.error
+  const actionError = pull.error ?? push.error ?? addRoms.error
   const needsSettings = [loadError, actionError].some(
     (e) => e instanceof ApiError && (e.code === 'deck_not_configured' || e.code === 'deck_unreachable'),
   )
@@ -146,17 +195,24 @@ export function EsdePage({ onOpenSettings }: { onOpenSettings: () => void }) {
             })}
           </select>
         </label>
-        <button className="btn" onClick={handlePull} disabled={!current || pull.isPending}>
+        <button className="btn" onClick={handlePull} disabled={!current || pull.isPending} title="gamelist.xmlを取り直し、PCに無いメディアを取得します">
           {pull.isPending ? '取得中…' : 'Deckから取得'}
+        </button>
+        <button className="btn" onClick={() => addRoms.mutate()} disabled={!current || addRoms.isPending}>
+          {addRoms.isPending ? 'ROM送信中…' : 'ROMを追加'}
+        </button>
+        <button className="btn" onClick={() => setShowCoverage(true)} disabled={!current}>
+          メディアチェック
         </button>
         <div className="toolbar-spacer" />
         {notice && <span className="notice">{notice}</span>}
         <button
           className="btn primary"
           onClick={() => push.mutate()}
-          disabled={pendingCount === 0 || push.isPending}
+          disabled={!current || push.isPending}
+          title="gamelist.xmlの編集と、PCで変更したメディアをDeckへ反映します"
         >
-          {push.isPending ? 'プッシュ中…' : `Deckへプッシュ${pendingCount > 0 ? `（${pendingCount}件）` : ''}`}
+          {push.isPending ? 'プッシュ中…' : `Deckへプッシュ${pendingCount > 0 ? `（編集 ${pendingCount}件）` : ''}`}
         </button>
       </div>
 
@@ -177,18 +233,49 @@ export function EsdePage({ onOpenSettings }: { onOpenSettings: () => void }) {
           onToggleUnregistered={setShowUnregistered}
         />
         {selectedGame ? (
-          <GameEditor
-            key={`${current}:${selectedGame.path}`}
-            system={current}
-            game={selectedGame}
-            edits={edits[selectedGame.path] ?? {}}
-            onChange={(field, value) => updateField(selectedGame.path, field, value)}
-            onDiscard={() => discardEdits(selectedGame.path)}
-          />
+          <section className="detail">
+            <div className="detail-tabs" role="tablist">
+              <button role="tab" aria-selected={detailTab === 'meta'} className={detailTab === 'meta' ? 'active' : ''} onClick={() => setDetailTab('meta')}>
+                メタデータ
+              </button>
+              <button role="tab" aria-selected={detailTab === 'media'} className={detailTab === 'media' ? 'active' : ''} onClick={() => setDetailTab('media')}>
+                メディア
+              </button>
+              <span className="detail-title">
+                {(edits[selectedGame.path]?.name ?? selectedGame.name) || romStem(selectedGame.path)}
+              </span>
+            </div>
+            {detailTab === 'meta' ? (
+              <GameEditor
+                key={`${current}:${selectedGame.path}`}
+                system={current}
+                game={selectedGame}
+                edits={edits[selectedGame.path] ?? {}}
+                onChange={(field, value) => updateField(selectedGame.path, field, value)}
+                onDiscard={() => discardEdits(selectedGame.path)}
+              />
+            ) : (
+              <MediaPanel
+                key={`${current}:${selectedGame.path}`}
+                system={current}
+                game={selectedGame}
+                title={edits[selectedGame.path]?.name ?? selectedGame.name}
+              />
+            )}
+          </section>
         ) : (
           <div className="editor editor-empty">ゲームを選択してください</div>
         )}
       </div>
+
+      {showCoverage && (
+        <CoverageDialog
+          system={current}
+          games={games.data ?? []}
+          onSelect={(path) => { setSelected(path); setDetailTab('media') }}
+          onClose={() => setShowCoverage(false)}
+        />
+      )}
     </div>
   )
 }

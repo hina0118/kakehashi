@@ -31,7 +31,20 @@ class RemoteFS(Protocol):
     def remove(self, path: str) -> None: ...
 
 
-DeckConnector = Callable[[], ContextManager[RemoteFS]]
+class TransferFS(RemoteFS, Protocol):
+    """ファイル転送もできる RemoteFS。"""
+    def list_files(self, path: str) -> dict[str, int]: ...
+    def upload(
+        self, tasks: list[tuple[Path, str]], overwrite: bool = False,
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> "TransferResult": ...
+    def download(
+        self, tasks: list[tuple[str, Path]],
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> "TransferResult": ...
+
+
+DeckConnector = Callable[[], ContextManager[TransferFS]]
 
 
 @dataclass
@@ -81,6 +94,17 @@ class DeckClient:
             except FileNotFoundError:
                 self._sftp.mkdir(current)
 
+    def list_files(self, path: str) -> dict[str, int]:
+        """path直下のファイル名とサイズ。フォルダが無ければ空。"""
+        try:
+            entries = self._sftp.listdir_attr(path)
+        except FileNotFoundError:
+            return {}
+        return {
+            e.filename: e.st_size or 0
+            for e in entries if not (e.st_mode and _stat.S_ISDIR(e.st_mode))
+        }
+
     def walk_files(self, path: str) -> Iterator[str]:
         """path配下のファイルを再帰的に列挙する（存在しなければ何も返さない）。"""
         try:
@@ -117,6 +141,29 @@ class DeckClient:
                 result.transferred += 1
             except Exception as e:  # 1ファイルの失敗で全体を止めない
                 result.errors.append(f"{local.name}: {e}")
+            finally:
+                if on_progress:
+                    on_progress(i, total)
+        return result
+
+    def download(
+        self,
+        tasks: list[tuple[str, Path]],
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> TransferResult:
+        """(リモートパス, ローカルパス) を順に取得する。途中で失敗したファイルは残さない。"""
+        result = TransferResult()
+        total = len(tasks)
+        for i, (remote, local) in enumerate(tasks, 1):
+            tmp = local.with_name(local.name + ".part")
+            try:
+                local.parent.mkdir(parents=True, exist_ok=True)
+                self._sftp.get(remote, str(tmp))
+                tmp.replace(local)
+                result.transferred += 1
+            except Exception as e:
+                tmp.unlink(missing_ok=True)
+                result.errors.append(f"{posixpath.basename(remote)}: {e}")
             finally:
                 if on_progress:
                     on_progress(i, total)

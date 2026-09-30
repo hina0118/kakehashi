@@ -3,13 +3,14 @@ from __future__ import annotations
 
 import re
 import threading
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Callable
 
 from kakehashi.config import Config
 from kakehashi.domain.esde import EDITABLE_FIELDS, EsdeGame, GameUpdate, UpdateResult
 from kakehashi.infra.deck import DeckConnector, RemoteFS, write_with_backup
 from kakehashi.infra.gamelist import Gamelist
+from kakehashi.services.jobs import Job
 
 _EXTENSIONS_RE = re.compile(r"\s*extensions\s*:\s*(.+)", re.IGNORECASE)
 
@@ -50,6 +51,19 @@ class EsdeService:
             and (not extensions or PurePosixPath(n).suffix.lower() in extensions)
         ]
         return [EsdeGame(path=f"./{n}", registered=False) for n in names]
+
+    def upload_roms(self, system: str, files: list[Path], job: Job, overwrite: bool = False) -> dict:
+        """PCのROMファイルをDeckのROMフォルダへ送る。送ったROMは未登録ROMとして一覧に現れる。"""
+        missing = [str(f) for f in files if not f.is_file()]
+        if missing:
+            raise ValueError(f"ファイルが見つかりません: {', '.join(missing)}")
+        rom_dir = self._get_config().steam_deck.rom_dir(system)
+        job.log(f"送信先: {rom_dir}/")
+        with self._connect() as fs:
+            res = fs.upload([(f, f"{rom_dir}/{f.name}") for f in files], overwrite=overwrite, on_progress=job.progress)
+        for e in res.errors:
+            job.log(f"失敗: {e}")
+        return {"transferred": res.transferred, "skipped": res.skipped, "errors": res.errors}
 
     def update_games(
         self, system: str, updates: list[GameUpdate], deleted: list[str] | None = None,

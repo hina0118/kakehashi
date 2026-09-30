@@ -5,10 +5,13 @@ gamelist.xml を取得し直す（UI 側で編集中の内容と食い違わな�
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from mcp.server.fastmcp import FastMCP
 
 from kakehashi.context import AppContext
 from kakehashi.domain.esde import EDITABLE_FIELDS, GameUpdate
+from kakehashi.domain.media import rom_stem
 
 mcp = FastMCP("kakehashi")
 _ctx = AppContext()
@@ -53,6 +56,51 @@ def update_games(system: str, updates: list[dict]) -> dict:
     """
     result = _ctx.esde.update_games(system, [GameUpdate.model_validate(u) for u in updates])
     return {"applied": result.applied, "requested": result.requested}
+
+
+@mcp.tool()
+def check_videos(system: str, paths: list[str] | None = None) -> list[dict]:
+    """指定した機種のゲームについて、PC側にプレイ動画（videos）があるかをまとめて確認する。
+
+    paths: 確認対象の path のリスト。省略時は機種内の全ゲーム。
+    見るのはPC側の media_base フォルダで、Deck への反映は Web UI の「Deckへプッシュ」で行う。
+    戻り値: [{"path", "name", "has_video", "video_file"}, ...]
+    """
+    games = _ctx.esde.get_games(system, refresh=True)
+    if paths is not None:
+        wanted = set(paths)
+        games = [g for g in games if g.path in wanted]
+    coverage = _ctx.media.coverage(system)
+    result = []
+    for g in games:
+        video = coverage.get(rom_stem(g.path), {}).get("videos")
+        result.append({"path": g.path, "name": g.name, "has_video": video is not None, "video_file": video})
+    return result
+
+
+@mcp.tool()
+def update_videos(system: str, updates: list[dict]) -> dict:
+    """複数ゲームのプレイ動画をまとめて登録・置換・削除する（保存先はPC側）。
+
+    updates: [{"path": "./game.zip", "source": "http(s)://... またはローカルファイルパス"}, ...]
+    source が http(s):// なら yt-dlp で取得する（動画ページURL・動画ファイルへの直リンクの両方に対応）。
+    それ以外はローカルファイルとしてコピーする。source を省略/空にすると既存の動画を削除する。
+    戻り値: {"applied", "requested", "errors": [{"path", "error"}, ...]}
+    """
+    applied, errors = 0, []
+    for item in updates:
+        path, source = item["path"], (item.get("source") or "").strip()
+        try:
+            if not source:
+                _ctx.media.delete(system, path, "videos")
+            elif source.startswith(("http://", "https://")):
+                _ctx.media.import_url(system, path, "videos", source)
+            else:
+                _ctx.media.import_file(system, path, "videos", Path(source))
+            applied += 1
+        except Exception as e:
+            errors.append({"path": path, "error": str(e)})
+    return {"applied": applied, "requested": len(updates), "errors": errors}
 
 
 def run() -> None:
