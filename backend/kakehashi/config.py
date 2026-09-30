@@ -1,6 +1,6 @@
 """config.json の読み書き。
 
-旧tkinterアプリと同じファイル・同じキー構成を使う。kakehashiが知らないキーも
+旧版（tkinterアプリ）の config.json をそのまま読める。kakehashiが知らないキーも
 保存時に失われないよう、各モデルは extra="allow" にしている。
 """
 from __future__ import annotations

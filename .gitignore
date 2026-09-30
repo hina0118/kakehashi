@@ -208,8 +208,9 @@ __marimo__/
 
 # kakehashi runtime
 config.json
-window_state.json
 work/
+# 旧版（tkinterアプリ）が作っていたファイル
+window_state.json
 
 # Claude Code local settings
 .claude/settings.local.json

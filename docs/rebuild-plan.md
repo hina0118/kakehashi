@@ -10,7 +10,7 @@ ES-DEのメタデータ編集ツールから、「ES-DEのゲーム」と「同�
 | バックエンド | Python + FastAPI |
 | フロントエンド | React + Vite（TypeScript）。本番ビルドは FastAPI が静的配信する |
 | 同人ゲーム | 台帳管理（PC上のSQLite）＋ Steam への非Steamゲーム登録 |
-| 進め方 | `rebuild` ブランチで新規に書き直す。完成まで旧アプリ（`src/`）は main で使える状態を保つ |
+| 進め方 | `rebuild` ブランチで新規に書き直し、完成後に main へマージした（旧アプリの `src/` は削除済み） |
 
 ## 設計方針
 
@@ -47,7 +47,7 @@ tests/                 pytest
 | 2 | メディア：存在チェック、サムネイル配信、3Dボックス・miximage・AIロゴ生成、動画（yt-dlp）、Deck へのメディア転送・ROM追加 | 完了 |
 | 3 | 同人台帳：フォルダ登録、メタデータ編集（サークル・作品ID・タグ・プレイ状況・起動exe）、カバー画像、Deck への転送 | 完了 |
 | 4 | Steam 登録：`shortcuts.vdf`（バイナリVDF）への追加、appid 算出、グリッド画像、Proton 設定（`config.vdf` の CompatToolMapping）、Steam 起動中チェック | 完了（実機での確認待ち） |
-| 5 | 旧 tkinter アプリ（`src/`）の削除、README 更新、main へマージ | |
+| 5 | 旧 tkinter アプリ（`src/`）の削除、README 更新、main へマージ | 完了 |
 
 ## メディアの扱い（Phase 2）
 
@@ -90,7 +90,7 @@ tests/                 pytest
 - 起動オプションの既定は `LANG=ja_JP.UTF-8 %command%`（Shift-JIS のゲームの文字化け対策）。互換ツールの既定は `proton_experimental`。どちらも作品ごとに上書きできる。
 - 登録先アカウントは `steam_deck.steam_user`。空なら `userdata/` にアカウントが1つだけのときに自動で選ぶ。
 
-## 開発版の起動方法
+## 起動方法
 
 ```bash
 # 依存関係（AIロゴ抽出も使うなら --extra ai を追加）
@@ -104,6 +104,6 @@ uv run kakehashi serve
 
 フロントエンドを開発するときは、`uv run kakehashi serve --no-browser --reload` と `npm --prefix frontend run dev` を並べて起動する（Vite が `/api` を 8765 番へ中継する）。
 
-MCP サーバは `uv run kakehashi mcp` で起動する。旧版（`src/mcp_server.py`）と同じ6つのツールを同じ名前・引数で公開しているため、登録先のコマンドを差し替えるだけで移行できる。同人台帳用に `list_doujin` / `get_doujin` / `update_doujin` / `fetch_dlsite` も追加している。
+MCP サーバは `uv run kakehashi mcp`（または `.venv/Scripts/kakehashi.exe mcp`）で起動する。旧版（`python -m src.mcp_server`）と同じ6つのツールを同じ名前・引数で公開しているため、登録先のコマンドを差し替えるだけで移行できる。同人台帳用に `list_doujin` / `get_doujin` / `update_doujin` / `fetch_dlsite` も追加している。
 
 テストは `uv run pytest`。Deck への接続はインメモリの偽実装に置き換えて実行する。

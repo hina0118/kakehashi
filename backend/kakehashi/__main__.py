@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import threading
 import webbrowser
 
@@ -32,6 +33,17 @@ def main() -> None:
         args = serve.parse_args([])
 
     import uvicorn
+
+    from kakehashi.api.app import FRONTEND_DIST
+
+    if not (FRONTEND_DIST / "index.html").is_file():
+        print(
+            "[kakehashi] 画面（frontend/dist）がビルドされていません。次のコマンドでビルドしてください:\n"
+            "  npm --prefix frontend install\n"
+            "  npm --prefix frontend run build\n"
+            "（APIだけは起動します）",
+            file=sys.stderr,
+        )
 
     if not args.no_browser:
         url = f"http://{args.host}:{args.port}/"

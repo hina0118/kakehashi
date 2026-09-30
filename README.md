@@ -1,298 +1,165 @@
 # kakehashi
-ES-DE（EmulationStation Desktop Edition）において、ゲームの日本語メタデータを効率的に管理するためのGUIツール
+
+Steam Deck のゲームを Windows PC から管理するツールです。
+
+- **ES-DE のゲーム**: 日本語のタイトル・説明文などのメタデータと、カバー・スクリーンショットなどのメディアを編集して Deck に反映する
+- **同人ゲーム**: 台帳で管理し、Deck へ転送して、Steam に非Steamゲームとして登録する
+
+PC で Web サーバを起動し、ブラウザで操作します。Deck へは SSH/SFTP で書き込みます。
 
 ---
 
-## 1. 開発目的
-EmulationStation Desktop Edition (ES-DE) において、標準のスクレイパーでは取得が難しい「日本語のゲームタイトル」「日本語の解説文」「国内版のボックスアート」を、.m3u ファイルや各種ROMファイルに対して個別に編集・管理するためのツール。
+## できること
+
+### ES-DE
+
+- 機種ごとの `gamelist.xml` を Deck から読み込み、タイトル・説明・発売日・開発・発売元・ジャンルを編集
+  - 「Deckへプッシュ」で変更した項目だけを最新の `gamelist.xml` にマージして書き戻す（`favorite` など kakehashi が扱わないタグは残す。書き込み前に世代バックアップ）
+  - Deck の ROM フォルダにあって未登録のファイルを一覧に出し、そのまま登録できる
+  - タイトルで Web 検索（DuckDuckGo / Google / Wikipedia / ファミ通）、説明文を翻訳（DeepL / Google翻訳）
+- **メディア**（PC の `downloaded_media` が正本）
+  - 11種類（3Dボックス・カバー・ロゴ・スクリーンショット・動画など）の確認・登録（ファイル / URL / yt-dlp）・削除
+  - 3Dボックス生成（PS2 などは公式パッケージ風の装飾）、miximage 合成、カバーからのロゴ切り出し（手動 / AI）
+  - 全ゲームの有無を一覧する「メディアチェック」
+  - Deck との同期: 取得は PC に無いものだけ（PC での編集を上書きしない）、PC で削除・差し替えたものは次のプッシュで Deck からも消す
+- ROM の追加（PC のファイルを Deck の ROM フォルダへ送る）
+
+### 同人ゲーム
+
+- 台帳（PC 上の SQLite）で管理: タイトル・サークル・作品ID・販売サイト・タグ・説明・発売日・プレイ状況・評価・メモ・起動ファイル
+- 登録方法: フォルダを1つ登録 / 作品フォルダが並んだ親フォルダからまとめて登録 / Deck に置いてある作品を取り込む
+  - フォルダ名から作品ID（`RJ…` / `d_…`）・サークル（`[サークル] タイトル` 形式）・タイトルを推定し、起動ファイルの候補を選ぶ
+- DLsite の作品IDから、タイトル・サークル・発売日・ジャンル・カバー画像を取得
+- Deck への転送（2回目以降は変わったファイルだけ）
+- **Steam への登録**: Deck の Steam に非Steamゲームとして登録し、ライブラリ画像（カバー・ヘッダー・ヒーロー・ロゴ・アイコン）と Proton の設定も書き込む
+
+### AI エージェントとの連携（MCP）
+
+gamelist の参照・編集、プレイ動画の登録、同人台帳の参照・編集、DLsite の作品情報取得を MCP ツールとして公開しています（[MCP サーバ](#mcp-サーバ)）。
 
 ---
 
-## 2. 主な機能
+## 必要なもの
 
-### gamelist.xml エディタ
-* ゲーム一覧からタイトルを選択して各フィールドを編集
-* 編集対象フィールド: タイトル / 説明 / 発売日 / 開発 / 発売元 / ジャンル
-* 発売日はカレンダーUIで入力（チェックで有効/無効を切替）
-* ジャンルはタグ形式で複数入力に対応
-* 保存時にタイムスタンプ付きバックアップを自動生成（世代数は `config.json` の `backup_max` で設定）
+- Windows 11
+- [uv](https://docs.astral.sh/uv/)（Python の実行環境を用意します）
+- [Node.js](https://nodejs.org/)（画面のビルドに使います）
+- SSH を有効にした Steam Deck（[Steam Deck の準備](#steam-deck-の準備初回のみ)）
+- 任意: NVIDIA の CUDA 対応 GPU（AI によるロゴ抽出を使う場合。初回に約2.5GBのモデルを読み込みます）
 
-### Web検索 / 翻訳
-画面下部のバーからワンクリックでブラウザを起動します。
+## 起動
 
-| ボタン | 用途 |
+`kakehashi.cmd` をダブルクリックします。初回は依存関係のインストールと画面のビルドを行い、ブラウザで <http://127.0.0.1:8765/> が開きます。
+
+コマンドで起動する場合:
+
+```bash
+uv sync --extra mcp
+npm --prefix frontend install
+npm --prefix frontend run build
+uv run kakehashi serve
+```
+
+AI によるロゴ抽出も使う場合は `uv sync --extra mcp --extra ai` でインストールします。
+
+初回は「設定」画面で Deck の接続先（IPアドレス・ユーザー名・パスワード）と各フォルダを設定し、「接続を確認」を押してください。設定は `config.json` に保存されます（旧版の `config.json` はそのまま使えます。例は `config.example.json`）。
+
+## Steam Deck の準備（初回のみ）
+
+デスクトップモードで Konsole を開き、SSH を有効にします。
+
+```bash
+sudo systemctl enable --now sshd
+passwd deck   # パスワードが未設定の場合
+ip addr show | grep "inet "   # 例: inet 192.168.1.42/24 → 192.168.1.42 がIPアドレス
+```
+
+---
+
+## 使い方の注意
+
+### ES-DE
+
+- **ES-DE を終了した状態で**プッシュしてください。ES-DE は起動中に `gamelist.xml` を保持しており、終了時に書き戻すため、起動中に書き込むと消えてしまうことがあります。
+- 反映後は ES-DE を再起動してください。
+
+### Steam への登録
+
+- **Deck の Steam を終了した状態で**実行してください。ゲームモードでは常に Steam が動いているので、デスクトップモードに切り替えて Steam を終了します。kakehashi は Steam が起動していると書き込まずに中止します。
+- 書き込む前に `shortcuts.vdf` と `config.vdf` をバックアップします（`shortcuts.vdf.日時.bak`）。元に戻すときは、このファイルを元の名前に戻してください。
+- 登録した作品のプレイ時間などは、タイトルを変えて更新しても引き継がれます（appID を台帳で保持しています）。
+- 起動オプションの既定値 `LANG=ja_JP.UTF-8 %command%` は、Shift-JIS で作られたゲームの文字化けを防ぎます。設定画面・作品ごとに変えられます。
+- Deck に複数の Steam アカウントがある場合は、設定画面で登録先を選んでください。
+
+### データの置き場所（PC）
+
+| 場所 | 内容 |
 |---|---|
-| DuckDuckGo | タイトル＋機種名で検索 |
-| Google | タイトル＋機種名で検索 |
-| Wikipedia | 日本語Wikipediaで検索 |
-| Famitsu | ファミ通サイトで検索 |
-| DeepL | 説明文を英日翻訳 |
-| Google翻訳 | 説明文を英日翻訳 |
+| `config.json` | 接続先・フォルダなどの設定 |
+| `work/doujin.db` | 同人ゲーム台帳 |
+| `work/doujin_images/` | 同人ゲームの画像 |
+| `work/pending_media_deletions.json` | PC で削除し、まだ Deck から消していないメディア |
+| `windows.media_base`（設定） | ES-DE のメディア（`downloaded_media`） |
 
-### PC間同期（Windows → Steam Deck）
-SSH/SFTPを使ってWindowsで編集したデータをSteam Deckへ転送します。
-
-* **「同期」タブ**でSSH接続設定（IP・ユーザー名・パスワード）を入力し、接続テスト
-* 転送内容を選択: `gamelist.xml` / メディアファイル（フォルダ単位で選択可）
-* 既存ファイルのスキップ（差分のみ）または上書きを選択
-* 転送はバックグラウンドスレッドで実行され、ログエリアにリアルタイム表示
-
-### 環境の自動判別
-`platform.system()` でOSを自動判別し、Windows / Steam Deck のパス設定を切り替えます。
-`config.json` に `environment` を明示した場合はそちらが優先されます。
-
-### 対象機種の自動検出
-`gamelist_base` 配下のフォルダ名を自動スキャンして機種一覧を生成します。
-フォルダが見つからない場合は `config.json` の `systems` リストにフォールバックします。
-
-### メディアタブ
-ゲームごとのメディアファイル（`3dboxes` / `backcovers` / `covers` / `fanart` / `manuals` /
-`marquees` / `miximages` / `physicalmedia` / `screenshots` / `titlescreens` / `videos` の11種）の
-存在確認・閲覧・生成を行います。
-
-* **存在チェック**: 各フォルダに ROM名 と一致するファイルがあるか一覧表示し、サムネイル・フルサイズ表示に対応
-* **3Dボックス画像生成**（`covers` → `3dboxes`）: カバー画像を射影変換でカバー正面＋背表紙に変形し、影を合成してプレビュー付きダイアログで生成
-  * 背表紙幅・奥行き・シャドウ有無・背表紙テキストをその場で調整可能
-  * PS2/PS3/PS4/PSP/PS Vita/PSX は公式パッケージ風テンプレート画像を合成した専用スタイルを適用（アセットが無い場合はテキスト描画にフォールバック）
-* **AIロゴ抽出**（`covers` → `marquees`）: Florence-2 でロゴ領域を検出し、BiRefNet で背景除去した透過PNGを生成（要NVIDIA CUDA GPU、初回ロード時に約2.5GB VRAM使用）
-* **miximage合成**（`screenshots`+`marquees`+`3dboxes`+`physicalmedia` → `miximages`）: 1280×960の透過PNGに、背景（角丸+ドロップシャドウ付きスクリーンショット）・右上（マーキー）・左下（3Dボックス、物理メディアがあれば並べて配置）を合成
+`work/` と `config.json` は Git の管理外です。台帳をバックアップする場合は `work/` をコピーしてください。
 
 ---
 
-## 3. ターゲットファイルとディレクトリ構造
+## MCP サーバ
 
-### 3.1 メタデータ定義ファイル (gamelist.xml)
-* 場所: `~/.emulationstation/gamelists/[機種名]/gamelist.xml`
-* 役割: ゲームのタイトル、説明、画像パス、発売日、メーカー情報をXML形式で保持する。
-
-### 3.2 メディアフォルダ
-* 場所: `~/.emulationstation/downloaded_media/[機種名]/`
-* サブフォルダ: `covers/`（パッケージ画像）, `screenshots/`（スクリーンショット）, `videos/`（動画）
-
----
-
-## 4. XMLデータ構造の定義 (ES-DE準拠)
-各ゲームエントリは以下のタグを持ちます。
-
-| タグ名 | 内容 | 備考 |
-|---|---|---|
-| path | ./filename.m3u | ROMの相対パス |
-| name | 日本語タイトル | 表示名 |
-| desc | ゲームのあらすじ | 日本語テキスト |
-| image | ./downloaded_media/ps2/covers/filename.png | 画像へのパス |
-| releasedate | YYYYMMDDT000000 | 発売日フォーマット |
-| developer | 開発会社名 | |
-| publisher | 発売元 | |
-| genre | ジャンル（カンマ区切り） | |
-
----
-
-## 5. 技術スタック
-
-* **言語**: Python 3.10以上
-* **GUIフレームワーク**: tkinter（標準ライブラリ）
-* **外部ライブラリ**:
-  * `tkcalendar` — カレンダー形式の日付入力
-  * `Pillow` — 画像サムネイル・フルサイズ表示、画像クロップ・合成（3Dボックス/miximage生成）
-  * `paramiko` — SSH/SFTP経由のPC間ファイル転送
-  * `numpy` — 射影変換の係数計算、アルファチャンネルからのbbox算出
-  * `transformers` / `einops` / `timm` / `accelerate` / `kornia`（任意、`pip install -e .[ai]`）— AIロゴ抽出（Florence-2 + BiRefNet、NVIDIA CUDA GPU必須）
-* **パッケージ管理**: uv（推奨）または pip
-* **プラットフォーム**: Windows 11 / SteamOS (Linux)
-
----
-
-## 6. 設定ファイル (config.json)
+Claude などの MCP クライアントに、次のように登録します（パスは環境に合わせてください）。
 
 ```json
 {
-  "system": "ps2",
-  "systems": ["ps2", "ps1", "psp", "ds", "gba"],
-  "backup_max": 5,
-  "windows": {
-    "rom_base": "C:/Users/YourName/Desktop/test_emu/roms",
-    "gamelist_base": "C:/path/to/gamelists",
-    "media_base": "C:/Users/YourName/.emulationstation/downloaded_media"
-  },
-  "steam_deck": {
-    "rom_base": "/run/media/mmcblk0p1/Emulation/roms",
-    "gamelist_base": "/home/deck/.emulationstation/gamelists",
-    "media_base": "/home/deck/.emulationstation/downloaded_media"
-  },
-  "sync": {
-    "host": "192.168.1.xxx",
-    "port": 22,
-    "username": "deck",
-    "password": "your_password"
+  "mcpServers": {
+    "kakehashi": {
+      "command": "C:/app/project/kakehashi/.venv/Scripts/kakehashi.exe",
+      "args": ["mcp"]
+    }
   }
 }
 ```
 
-| キー | 説明 | 省略 |
-|---|---|---|
-| `environment` | `"windows"` または `"steam_deck"` を明示 | 可（OS自動判別） |
-| `systems` | 機種リスト | 可（`gamelist_base` 配下フォルダを自動検出） |
-| `sync.host` | Steam DeckのIPアドレス | 同期タブで入力・自動保存 |
-| `sync.port` | SSHポート番号（既定: 22） | 同期タブで入力・自動保存 |
-| `sync.username` | SSHユーザー名（既定: `deck`） | 同期タブで入力・自動保存 |
-| `sync.password` | SSHパスワード | 同期タブで入力・自動保存 |
-
----
-
-## 7. PC間同期機能の使い方
-
-WindowsでメタデータやメディアファイルをそろえたあとSteam DeckへSSH転送する機能です。
-
-### 7.1 Steam Deck側の準備（初回のみ）
-
-Steam Deckのデスクトップモードで **Konsole（ターミナル）** を開き、以下を実行します。
-
-```bash
-# SSHサーバーを有効化（SteamOS 3.x は systemd ベース）
-sudo systemctl enable --now sshd
-
-# deckユーザーにパスワードを設定（未設定の場合）
-passwd deck
-```
-
-Steam DeckのIPアドレスはKonsoleで確認できます。
-
-```bash
-ip addr show | grep "inet "
-# 例: inet 192.168.1.42/24 brd ...  → 192.168.1.42 がIPアドレス
-```
-
-> **注意**: Steam DeckはSteamモードに戻るとSSHサーバーが停止する場合があります。
-> 転送する際は**デスクトップモード**のままにしておくか、`sudo systemctl start sshd` で都度起動してください。
-
-### 7.2 kakehashiでの転送手順
-
-1. **「同期」タブ**を開く
-2. **SSH接続設定**にSteam DeckのIPアドレス・ユーザー名・パスワードを入力
-3. **「接続テスト & 保存」**ボタンをクリック → 「✓ 接続成功」と表示されることを確認（設定はconfig.jsonに自動保存）
-4. 上部の**対象機種**コンボから転送したい機種を選択
-5. **転送内容**（`gamelist.xml` / メディアフォルダ）を選択
-6. メディアの場合は**フォルダ種別**（covers / screenshots / videos など）を選択
-7. **既存ファイル**の扱いを選択: 「スキップ（差分のみ）」または「上書き」
-8. **「転送実行」**ボタンをクリック → ログエリアに進捗が表示される
-
-### 7.3 転送先パス（参考）
-
-| 種別 | Steam Deck上のパス |
+| ツール | 内容 |
 |---|---|
-| gamelist.xml | `~/.emulationstation/gamelists/{機種}/gamelist.xml` |
-| メディア | `~/.emulationstation/downloaded_media/{機種}/{フォルダ}/` |
+| `list_systems` / `list_games` / `get_games` / `update_games` | ES-DE の機種・ゲーム一覧とメタデータの参照・更新 |
+| `check_videos` / `update_videos` | プレイ動画の有無の確認と、URL（yt-dlp）・ファイルからの登録・削除 |
+| `list_doujin` / `get_doujin` / `update_doujin` | 同人台帳の参照・更新 |
+| `fetch_dlsite` | DLsite の作品情報の取得 |
 
 ---
 
-## 8. 運用上の注意点
-* ES-DEが起動している間に `gamelist.xml` を上書きすると、ES-DE終了時にデータが消える可能性があります。**必ずES-DEを終了させた状態で実行**してください。
-* PC間同期は **Windows → Steam Deck の一方向転送**です。Steam Deck側で編集したデータをWindowsへ戻す機能はありません。
+## トラブルシューティング
 
----
-
-## 9. WindowsとSteam Deckの「パス」の違い
-
-| 項目 | Windowsでの標準的な場所 | Steam Deck (Linux) での場所 |
-|---|---|---|
-| gamelist.xml | `%HOMEPATH%\.emulationstation\gamelists\` | `~/.emulationstation/gamelists/` |
-| メディアフォルダ | `%HOMEPATH%\.emulationstation\downloaded_media\` | `~/.emulationstation/downloaded_media/` |
-| ROMフォルダ | （任意の設定場所） | `/run/media/mmcblk0p1/Emulation/roms/`（SDカード） |
-
----
-
-## 🖥️ Windows での実行方法
-
-```bash
-# 依存ライブラリをインストール（初回のみ）
-pip install -r requirements.txt
-
-# 起動
-python main.py
-```
-
-uv を使う場合：
-```bash
-uv sync
-uv run python main.py
-```
-
----
-
-## 🚀 Steam Deck (SteamOS) での実行方法
-Steam Deckのデスクトップモードで以下の手順を実行してください。
-
-### 1. リポジトリのクローン
-ターミナル（Konsole）を開き、プロジェクトをダウンロードします。
-
-```bash
-cd ~/Desktop
-git clone https://github.com/hina0118/kakehashi.git
-cd kakehashi
-```
-
-### 2. 起動スクリプトで実行（推奨）
-`start.sh` が環境を自動セットアップして起動します。
-`uv` がインストールされていれば uv を、なければ pip を使います。
-
-```bash
-chmod +x start.sh
-./start.sh
-```
-
-**uv を使う場合（高速・推奨）:**
-```bash
-# uv のインストール（初回のみ）
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-./start.sh
-```
-
-**pip を使う場合:**
-```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python main.py
-```
-
-### 3. 設定ファイルの確認
-`config.json` の `steam_deck` セクションのパスが環境に合っているか確認してください。
-`environment` キーは省略可能で、SteamOS（Linux）上では自動的に `steam_deck` 設定が使われます。
-
----
-
-## 🛠️ トラブルシューティング
-
-**パスが見つからない場合**
-Steam Deckでは、SDカードのパスが個体によって異なる場合があります。
-ターミナルで `ls /run/media/` を実行し、自分の環境のSDカード名（`mmcblk0p1` など）を確認してください。
-
-**ES-DEへの反映**
-`gamelist.xml` を更新した後は、ES-DEを再起動するか、ES-DEのメニューから
-`「MAIN MENU」>「UI SETTINGS」>「RELOAD ALL MIXED IMAGES」` を実行してください。
-※ES-DEが起動中にスクリプトを実行すると、ES-DE終了時にデータが上書きされる可能性があるため、ES-DEを閉じてからの実行を推奨します。
-
-**同期タブが「paramiko がインストールされていません」と表示される**
-以下のいずれかを実行してください。
-
-```bash
-# uv を使う場合
-uv sync
-
-# pip を使う場合
-pip install paramiko
-```
-
-**「接続テスト」で ✗ エラーになる**
-
-| 原因 | 対処 |
+| 症状 | 対処 |
 |---|---|
-| Steam DeckのSSHが起動していない | Steam DeckのKonsoleで `sudo systemctl start sshd` を実行 |
-| IPアドレスが違う | `ip addr show` で現在のIPを再確認 |
-| パスワードが未設定 | `passwd deck` でパスワードを設定 |
-| ファイアウォール | Steam DeckはデフォルトでSSHポート(22)を開放しているため通常不要 |
-| 同じLAN内にない | WindowsとSteam Deckが同じWi-Fiまたは有線LANに接続されているか確認 |
+| Deck に接続できない | Deck がスリープしていないか、同じネットワークにいるかを確認。`sudo systemctl start sshd` で SSH を起動 |
+| 「Steamが起動しています」と出る | デスクトップモードで Steam を終了してから実行 |
+| ES-DE に反映されない | ES-DE を再起動する |
+| SDカードのパスがわからない | Deck で `ls /run/media/` を実行 |
+| 画面が表示されない | `npm --prefix frontend run build` で画面をビルド |
 
-**転送後にES-DEに反映されない**
-Steam DeckのES-DEを再起動するか、`「MAIN MENU」>「UI SETTINGS」>「RELOAD ALL MIXED IMAGES」` を実行してください。
+---
+
+## 開発
+
+```bash
+uv run kakehashi serve --no-browser --reload   # API（ポート 8765）
+npm --prefix frontend run dev                  # 画面（Vite が /api を 8765 に中継）
+uv run pytest                                  # テスト（Deck はインメモリの偽実装に置き換える）
+npm --prefix frontend run lint
+```
+
+構成と設計の経緯は [docs/rebuild-plan.md](docs/rebuild-plan.md) を参照してください。
+
+```
+backend/kakehashi/
+  domain/      ES-DE・メディア・同人ゲームのモデル
+  infra/       Deck への SSH/SFTP、gamelist.xml、VDF、SQLite、DLsite など外部とのやり取り
+  imaging/     3Dボックス・miximage・ロゴ抽出・Steam 用画像の生成
+  services/    業務処理（Web API と MCP の両方から呼ぶ）
+  api/         FastAPI のルーター
+  mcp/         MCP サーバ
+frontend/      React + Vite
+tests/         pytest
+```
