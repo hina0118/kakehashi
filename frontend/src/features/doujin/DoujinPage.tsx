@@ -8,6 +8,7 @@ import { BulkRegisterDialog } from './BulkRegisterDialog'
 import { DeckImportDialog } from './DeckImportDialog'
 import { DoujinDetail } from './DoujinDetail'
 import { SteamBulkDialog } from './SteamBulkDialog'
+import { SteamImportDialog } from './SteamImportDialog'
 
 type Sort = 'title' | 'circle' | 'updated' | 'created' | 'release'
 
@@ -29,7 +30,7 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [deckFilter, setDeckFilter] = useState<'' | 'on' | 'off'>('')
   const [steamFilter, setSteamFilter] = useState<'' | 'on' | 'off'>('')
   const [sort, setSort] = useState<Sort>('title')
-  const [dialog, setDialog] = useState<'bulk' | 'deck' | 'steam' | null>(null)
+  const [dialog, setDialog] = useState<'bulk' | 'deck' | 'steam' | 'steam-import' | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
   const all = useMemo(() => games.data ?? [], [games.data])
@@ -75,6 +76,7 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
         </button>
         <button className="btn" onClick={() => setDialog('bulk')}>まとめて登録</button>
         <button className="btn" onClick={() => setDialog('deck')}>Deckから取り込み</button>
+        <button className="btn" onClick={() => setDialog('steam-import')}>Steamから取り込み</button>
         <button className="btn" onClick={() => setDialog('steam')}>Steamにまとめて反映</button>
         <div className="toolbar-spacer" />
         {notice && <span className="notice">{notice}</span>}
@@ -170,6 +172,16 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
           onRegistered={(created) => {
             created.forEach(upsert)
             setNotice(`${created.length}件を登録しました。`)
+          }}
+        />
+      )}
+      {dialog === 'steam-import' && (
+        <SteamImportDialog
+          onClose={() => setDialog(null)}
+          onOpenSettings={() => { setDialog(null); onOpenSettings() }}
+          onImported={(games) => {
+            games.forEach(upsert)
+            setNotice(`Steamから${games.length}件を取り込みました（既存の作品への紐づけを含む）。`)
           }}
         />
       )}

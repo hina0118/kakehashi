@@ -235,3 +235,113 @@ def test_remove_keeps_appid_for_next_time(steam_ctx, deck_fs):
     g = steam_ctx.doujin.get(gid)
     assert g.steam_registered_at is None and g.steam_appid == r.appid
     assert steam_ctx.steam.status().registered_appids == []
+
+
+# ---- 既存のSteam登録との共存（実機の登録内容を模したもの） ----
+
+WIN = "/home/deck/Documents/wingames"
+
+
+def existing_steam(deck_fs, entries):
+    """手動などで登録済みの shortcuts.vdf・Proton設定・画像を用意する。"""
+    sc = Shortcuts(None)
+    kv = text_vdf.loads(CONFIG_VDF)
+    for appid, name, exe, tool, launch in entries:
+        sc.upsert(ShortcutSpec(appid=appid, name=name, exe=exe, start_dir=exe.strip('"').rsplit("/", 1)[0] + "/",
+                               launch_options=launch))
+        if tool:
+            set_compat_tool(kv, appid, tool)
+    deck_fs.files[SC_PATH] = sc.dumps()
+    deck_fs.files[CFG_PATH] = text_vdf.dumps(kv)
+
+
+@pytest.fixture
+def real_like(steam_ctx, deck_fs):
+    steam_ctx.config.steam_deck = DeckPaths(**{**steam_ctx.config.steam_deck.model_dump(), "doujin_base": [WIN]})
+    existing_steam(deck_fs, [
+        (3748535911, "★アルム冒険者団", f'"{WIN}/アルム_v1_5/Game.exe"', "GE-Proton9-14", ""),
+        (2422716232, "★tratrittle", f'"{WIN}/tratrittle_v1.3.4/maid/Game.exe"', "GE-Proton9-27", ""),
+        (2800000000, "Outside", '"/home/deck/Documents/drm/作品A/sub/a.exe"', "GE-Proton9-16", ""),
+        (2800000001, "Outside2", '"/home/deck/Documents/drm/作品B/b.exe"', "", ""),
+        (3373760206, "ES-DE", '"/run/media/deck/SR01T/Emulation/tools/launchers/es-de.sh"', "", "LANG=ja_JP.UTF-8 %command%"),
+    ])
+    deck_fs.files[f"{GRID}/2422716232p.jpg"] = b"user art"
+    return steam_ctx
+
+
+def test_scan_shortcuts_lists_windows_games_and_splits_paths(real_like):
+    scan = real_like.steam.scan_shortcuts()
+    by = {s.appid: s for s in scan.shortcuts}
+    assert 3373760206 not in by  # .sh（エミュレータのランチャー）は対象外
+    t = by[2422716232]
+    assert (t.deck_dir, t.exe, t.in_base, t.compat_tool, t.has_art) == (
+        f"{WIN}/tratrittle_v1.3.4", "maid/Game.exe", True, "GE-Proton9-27", True,
+    )
+    o = by[2800000000]
+    assert (o.deck_dir, o.exe, o.in_base) == ("/home/deck/Documents/drm/作品A/sub", "a.exe", False)
+    assert scan.suggested_bases == ["/home/deck/Documents/drm"]
+
+
+def test_import_shortcuts_keeps_appid_proton_and_links_existing(real_like, deck_fs):
+    # 台帳に同じ作品がある（Deckから取り込んだが、まだSteamと紐づいていない）
+    linked = real_like._doujin_db.create({"title": "アルム", "deck_dir": f"{WIN}/アルム_v1_5", "exe": "Game.exe"})
+
+    games = real_like.steam.import_shortcuts([3748535911, 2422716232])
+    by = {g.steam_appid: g for g in games}
+    assert by[3748535911].id == linked["id"]  # 新規に作らず紐づけ
+    assert by[3748535911].title == "アルム"  # 台帳のタイトルはそのまま
+    t = by[2422716232]
+    assert (t.title, t.deck_dir, t.exe, t.compat_tool) == ("★tratrittle", f"{WIN}/tratrittle_v1.3.4", "maid/Game.exe", "GE-Proton9-27")
+    assert t.steam_registered_at is not None
+
+    # 取り込み済みのものは一覧で「台帳にあり」になり、再度取り込んでも増えない
+    assert real_like.steam.import_shortcuts([2422716232]) == []
+
+
+def test_register_adopts_existing_entry_by_exe(real_like, deck_fs):
+    """台帳の作品がSteamに手動登録済みなら、そのエントリを引き継いで更新する（二重登録しない）。"""
+    g = real_like._doujin_db.create({"title": "tratrittle", "deck_dir": f"{WIN}/tratrittle_v1.3.4", "exe": "maid/Game.exe"})
+    sc = Shortcuts(deck_fs.read_bytes(SC_PATH))
+    sc.find(2422716232).set_int32("LastPlayTime", 999)
+    deck_fs.files[SC_PATH] = sc.dumps()
+    before = len(sc.entries())
+
+    [r] = real_like.steam.apply([g["id"]], Job("t", "t"))
+
+    assert (r.appid, r.action) == (2422716232, "既存の登録を引き継いで更新")
+    sc = Shortcuts(deck_fs.read_bytes(SC_PATH))
+    assert len(sc.entries()) == before
+    e = sc.find(2422716232)
+    assert (e.get("AppName"), e.get("LastPlayTime"), e.get("LaunchOptions")) == ("tratrittle", 999, "")
+    # 作品ごとに選んだProtonを既定値で上書きしない
+    assert get_compat_tool(text_vdf.loads(deck_fs.read_text(CFG_PATH)), 2422716232) == "GE-Proton9-27"
+    assert real_like.doujin.get(g["id"]).steam_appid == 2422716232
+
+
+def test_existing_art_is_kept_unless_overwrite(real_like, deck_fs, tmp_path):
+    g = real_like._doujin_db.create({"title": "tratrittle", "deck_dir": f"{WIN}/tratrittle_v1.3.4", "exe": "maid/Game.exe"})
+    cover = tmp_path / "c.png"
+    Image.new("RGB", (600, 900), (10, 200, 10)).save(cover)
+    real_like.doujin.import_image_file(g["id"], "cover", cover)
+
+    real_like.steam.apply([g["id"]], Job("t", "t"))
+    assert deck_fs.files[f"{GRID}/2422716232p.jpg"] == b"user art"  # 既存の画像を残す
+    assert f"{GRID}/2422716232p.png" not in deck_fs.files
+    assert f"{GRID}/2422716232.png" in deck_fs.files  # 無かった種類は書き込む
+
+    real_like.steam.apply([g["id"]], Job("t", "t"), overwrite_art=True)
+    assert f"{GRID}/2422716232p.png" in deck_fs.files
+    assert f"{GRID}/2422716232p.jpg" not in deck_fs.files  # 拡張子違いの古い画像は片付ける
+
+
+def test_art_without_source_is_not_deleted(real_like, deck_fs):
+    g = real_like._doujin_db.create({"title": "t", "deck_dir": f"{WIN}/tratrittle_v1.3.4", "exe": "maid/Game.exe"})
+    real_like.steam.apply([g["id"]], Job("t", "t"), overwrite_art=True)
+    assert deck_fs.files[f"{GRID}/2422716232p.jpg"] == b"user art"
+
+
+def test_appid_used_by_other_catalog_entry_is_rejected(real_like):
+    a = real_like._doujin_db.create({"title": "A", "deck_dir": f"{WIN}/tratrittle_v1.3.4", "exe": "maid/Game.exe"})
+    b = real_like._doujin_db.create({"title": "B", "deck_dir": f"{WIN}/tratrittle_v1.3.4", "exe": "maid/Game.exe"})
+    ra, rb = real_like.steam.apply([a["id"], b["id"]], Job("t", "t"))
+    assert ra.error is None and "「A」" in rb.error

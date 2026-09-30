@@ -1,6 +1,7 @@
 """shortcuts.vdf（非Steamゲームの一覧）の操作。"""
 from __future__ import annotations
 
+import posixpath
 import zlib
 from dataclasses import dataclass
 
@@ -33,6 +34,17 @@ def quote(path: str) -> str:
     return f'"{path}"'
 
 
+def normalize_path(value: str) -> str:
+    """Exe/StartDir の値を比較用に正規化する（引用符・重複した / ・末尾の / を除く）。"""
+    p = value.strip().strip('"')
+    return posixpath.normpath(p) if p else ""
+
+
+def entry_appid(entry: Node) -> int | None:
+    v = entry.get("appid")
+    return to_unsigned(v) if isinstance(v, int) else None
+
+
 @dataclass
 class ShortcutSpec:
     appid: int
@@ -41,8 +53,10 @@ class ShortcutSpec:
     """引用符付きの起動ファイルのパス"""
     start_dir: str
     """引用符付きの作業フォルダ"""
-    icon: str = ""
-    launch_options: str = ""
+    icon: str | None = ""
+    """None なら既存の値を残す"""
+    launch_options: str | None = ""
+    """None なら既存の値を残す"""
 
 
 class Shortcuts:
@@ -64,6 +78,11 @@ class Shortcuts:
                 return e
         return None
 
+    def find_by_exe(self, exe_path: str) -> Node | None:
+        """起動ファイルのパスが一致するエントリ（引用符や / の重複の違いは無視する）。"""
+        target = normalize_path(exe_path)
+        return next((e for e in self.entries() if normalize_path(str(e.get("Exe") or "")) == target), None)
+
     def upsert(self, spec: ShortcutSpec) -> bool:
         """appID が一致するエントリを更新し、無ければ追加する。追加したら True。
 
@@ -82,7 +101,7 @@ class Shortcuts:
                 ("AllowDesktopConfig", 1, bvdf.T_INT32), ("AllowOverlay", 1, bvdf.T_INT32),
                 ("OpenVR", 0, bvdf.T_INT32), ("Devkit", 0, bvdf.T_INT32), ("DevkitGameID", "", bvdf.T_STRING),
                 ("DevkitOverrideAppID", 0, bvdf.T_INT32), ("LastPlayTime", 0, bvdf.T_INT32),
-                ("FlatpakAppID", "", bvdf.T_STRING),
+                ("FlatpakAppID", "", bvdf.T_STRING), ("sortas", "", bvdf.T_STRING),
             ]:
                 entry.set(key, value, t)
             entry.set("tags", Node(), bvdf.T_MAP)
@@ -91,8 +110,10 @@ class Shortcuts:
         entry.set_str("AppName", spec.name)
         entry.set_str("Exe", spec.exe)
         entry.set_str("StartDir", spec.start_dir)
-        entry.set_str("icon", spec.icon)
-        entry.set_str("LaunchOptions", spec.launch_options)
+        if spec.icon is not None:
+            entry.set_str("icon", spec.icon)
+        if spec.launch_options is not None:
+            entry.set_str("LaunchOptions", spec.launch_options)
         self._reindex()
         return created
 

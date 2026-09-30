@@ -15,6 +15,7 @@ export function SteamBulkDialog({ games, onClose, onDone, onOpenSettings }: Prop
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<unknown>(null)
   const [results, setResults] = useState<SteamGameResult[] | null>(null)
+  const [overwriteArt, setOverwriteArt] = useState(false)
 
   const s = status.data
   const blocked = !s || s.running || !s.user
@@ -23,7 +24,7 @@ export function SteamBulkDialog({ games, onClose, onDone, onOpenSettings }: Prop
     setBusy(true)
     setError(null)
     try {
-      const r = await runJob(() => steamApi.apply([...checked]))
+      const r = await runJob(() => steamApi.apply([...checked], overwriteArt))
       setResults(r)
       onDone(await Promise.all(r.filter((x) => !x.error).map((x) => doujinApi.get(x.id))))
       status.refetch()
@@ -71,7 +72,13 @@ export function SteamBulkDialog({ games, onClose, onDone, onOpenSettings }: Prop
           {!s.user && <button className="link" onClick={onOpenSettings}>設定を開く</button>}
         </div>
       )}
-      <p className="hint">Deckに転送済みで起動ファイルが設定された作品が対象です。登録済みの作品は内容を更新します。</p>
+      <p className="hint">
+        Deckに転送済みで起動ファイルが設定された作品が対象です。Steamに同じ起動ファイルの登録が既にあれば、それを引き継いで更新します（二重登録しません）。
+      </p>
+      <label className="check">
+        <input type="checkbox" checked={overwriteArt} onChange={(e) => setOverwriteArt(e.target.checked)} />
+        Deckにある既存の画像も台帳の画像で置き換える
+      </label>
       {error != null && <ErrorBox error={error} />}
       <div className="coverage-table-wrap">
         <table className="coverage-table candidate-table">

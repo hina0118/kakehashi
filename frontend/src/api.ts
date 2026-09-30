@@ -285,9 +285,35 @@ export type SteamArtKind = (typeof STEAM_ART_KINDS)[number]
 export const steamArtUrl = (g: DoujinGame, kind: SteamArtKind) =>
   `/api/steam/art/${g.id}/${kind}.png?v=${encodeURIComponent(g.updated_at + JSON.stringify(g.images))}`
 
+export type SteamShortcut = {
+  appid: number
+  name: string
+  exe_path: string
+  launch_options: string
+  compat_tool: string
+  has_art: boolean
+  deck_dir: string
+  exe: string
+  in_base: boolean
+  linked_id: number | null
+  match_id: number | null
+}
+export type SteamScan = { shortcuts: SteamShortcut[]; suggested_bases: string[] }
+
 export const steamApi = {
   status: () => request<SteamStatus>('/api/steam/status'),
   compatTools: () => request<string[]>('/api/steam/compat-tools'),
-  apply: (ids: number[]) => post<JobView<SteamGameResult[]>>('/api/steam/apply', { ids }),
+  shortcuts: () => request<SteamScan>('/api/steam/shortcuts'),
+  importShortcuts: (appids: number[]) => post<DoujinGame[]>('/api/steam/import', { appids }),
+  apply: (ids: number[], overwriteArt = false) =>
+    post<JobView<SteamGameResult[]>>('/api/steam/apply', { ids, overwrite_art: overwriteArt }),
   remove: (ids: number[]) => post<JobView<SteamGameResult[]>>('/api/steam/remove', { ids }),
+}
+
+/** 設定の一部だけを変えて保存する（パスワードは送らず、保存済みのものを維持する）。 */
+export async function updateSettings(change: (s: Settings) => Partial<Omit<Settings, 'sync'>>): Promise<Settings> {
+  const current = await api.settings()
+  const next = { ...current, ...change(current) }
+  const { password_set: _unused, ...sync } = next.sync
+  return api.saveSettings({ ...next, sync })
 }

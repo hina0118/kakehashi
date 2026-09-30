@@ -29,6 +29,7 @@ export function SteamSection({ game, compatTool, launchOptions, onCompatTool, on
   const [busy, setBusy] = useState<'apply' | 'remove' | null>(null)
   const [error, setError] = useState<unknown>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const [overwriteArt, setOverwriteArt] = useState(false)
   // 作れなかった（元になる画像が無い）種類。URLが変わったら確認し直す
   const [missingArt, setMissingArt] = useState<Record<string, boolean>>({})
 
@@ -44,7 +45,7 @@ export function SteamSection({ game, compatTool, launchOptions, onCompatTool, on
     setError(null)
     setMessage(null)
     try {
-      const [r] = await runJob(() => (kind === 'apply' ? steamApi.apply([game.id]) : steamApi.remove([game.id])))
+      const [r] = await runJob(() => (kind === 'apply' ? steamApi.apply([game.id], overwriteArt) : steamApi.remove([game.id])))
       if (r.error) throw new Error(r.error)
       setMessage(kind === 'apply' ? `Steamに${r.action}しました。DeckでSteamを起動すると反映されます。` : 'Steamから外しました。')
       onDone(await doujinApi.get(game.id))
@@ -91,13 +92,18 @@ export function SteamSection({ game, compatTool, launchOptions, onCompatTool, on
       </div>
       <p className="hint">
         台帳の画像からSteam用の各サイズを作ります。比率が合わないものは、ぼかした背景に収めます。ロゴとアイコンは台帳に登録したときだけ送ります。
+        Deckに既に画像がある種類は、既定では残します。
       </p>
+      <label className="check">
+        <input type="checkbox" checked={overwriteArt} onChange={(e) => setOverwriteArt(e.target.checked)} />
+        Deckにある既存の画像も置き換える
+      </label>
 
       <div className="form-row">
         <label className="field grow">
           <span className="field-label">互換ツール（Proton）</span>
           <select value={compatTool} onChange={(e) => onCompatTool(e.target.value)} disabled={!isWindows && !!game.exe}>
-            <option value="">既定（{defaults?.default_compat_tool || '未設定'}）</option>
+            <option value="">{registered ? '変更しない（Steamの現在の設定のまま）' : `既定（${defaults?.default_compat_tool || '未設定'}）`}</option>
             {toolOptions.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
         </label>
@@ -105,7 +111,7 @@ export function SteamSection({ game, compatTool, launchOptions, onCompatTool, on
           <span className="field-label">起動オプション</span>
           <input
             value={launchOptions}
-            placeholder={`既定: ${defaults?.default_launch_options || '（なし）'}`}
+            placeholder={registered ? '空欄ならSteamの現在の設定のまま' : `既定: ${defaults?.default_launch_options || '（なし）'}`}
             onChange={(e) => onLaunchOptions(e.target.value)}
           />
         </label>

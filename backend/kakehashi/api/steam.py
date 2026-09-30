@@ -6,7 +6,8 @@ from pydantic import BaseModel
 from kakehashi.api.deps import Ctx
 from kakehashi.errors import NotFoundError
 from kakehashi.services.jobs import JobView
-from kakehashi.services.steam import SteamStatus, art_png
+from kakehashi.domain.doujin import DoujinGame
+from kakehashi.services.steam import SteamScan, SteamStatus, art_png
 
 router = APIRouter(tags=["steam"])
 
@@ -33,12 +34,31 @@ class IdsRequest(BaseModel):
     ids: list[int]
 
 
+class ApplyRequest(IdsRequest):
+    overwrite_art: bool = False
+    """Deckに既にあるライブラリ画像も台帳の画像で置き換えるか"""
+
+
 @router.post("/apply")
-def apply(ctx: Ctx, body: IdsRequest) -> JobView:
+def apply(ctx: Ctx, body: ApplyRequest) -> JobView:
     return ctx.jobs.submit(
         "steam.apply", f"Steamに{len(body.ids)}件を登録",
-        lambda job: [r.model_dump() for r in ctx.steam.apply(body.ids, job)],
+        lambda job: [r.model_dump() for r in ctx.steam.apply(body.ids, job, overwrite_art=body.overwrite_art)],
     )
+
+
+@router.get("/shortcuts")
+def shortcuts(ctx: Ctx) -> SteamScan:
+    return ctx.steam.scan_shortcuts()
+
+
+class ImportRequest(BaseModel):
+    appids: list[int]
+
+
+@router.post("/import")
+def import_shortcuts(ctx: Ctx, body: ImportRequest) -> list[DoujinGame]:
+    return ctx.steam.import_shortcuts(body.appids)
 
 
 @router.post("/remove")

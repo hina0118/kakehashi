@@ -1417,6 +1417,12 @@ textarea {
   color: var(--danger);
 }
 
+.plain-list {
+  margin: 0;
+  padding-left: 18px;
+  width: 100%;
+}
+
 /* ---- 狭い画面 ---- */
 
 @media (max-width: 720px) {
