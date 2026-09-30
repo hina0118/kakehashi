@@ -28,7 +28,7 @@ def test_update_merges_into_latest_remote_content(ctx, deck_fs):
     result = ctx.esde.update_games("ps2", [GameUpdate(path="./b.chd", fields={"name": "ゲームB"})])
 
     assert (result.applied, result.requested) == (1, 1)
-    b = Gamelist(deck_fs.files[GAMELIST_PATH]).to_models()[1]
+    b = Gamelist(deck_fs.read_text(GAMELIST_PATH)).to_models()[1]
     assert (b.name, b.extra) == ("ゲームB", {"favorite": "true"})
     # キャッシュも書き込み後の内容になる
     assert ctx.esde.get_games("ps2")[1].name == "ゲームB"
@@ -62,5 +62,5 @@ def test_update_rejects_non_editable_field(ctx):
 def test_update_creates_gamelist_when_missing(ctx, deck_fs):
     del deck_fs.files[GAMELIST_PATH]
     ctx.esde.update_games("ps2", [GameUpdate(path="./c.chd", fields={"name": "C"})])
-    assert Gamelist(deck_fs.files[GAMELIST_PATH]).to_models()[0].name == "C"
+    assert Gamelist(deck_fs.read_text(GAMELIST_PATH)).to_models()[0].name == "C"
     assert backups(deck_fs) == []

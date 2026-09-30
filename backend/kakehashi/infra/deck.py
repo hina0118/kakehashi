@@ -26,6 +26,8 @@ class DeckConnectionError(RuntimeError):
 class RemoteFS(Protocol):
     def read_text(self, path: str) -> str: ...
     def write_text(self, path: str, content: str) -> None: ...
+    def read_bytes(self, path: str) -> bytes: ...
+    def write_bytes(self, path: str, content: bytes) -> None: ...
     def listdir(self, path: str) -> list[str]: ...
     def exists(self, path: str) -> bool: ...
     def remove(self, path: str) -> None: ...
@@ -36,6 +38,7 @@ class TransferFS(RemoteFS, Protocol):
     def list_files(self, path: str) -> dict[str, int]: ...
     def list_dirs(self, path: str) -> list[str]: ...
     def walk_files(self, path: str) -> Iterator[str]: ...
+    def run(self, command: str, timeout: float = 30) -> tuple[int, str, str]: ...
     def upload(
         self, tasks: list[tuple[Path, str]], overwrite: bool = False,
         on_progress: Callable[[int, int], None] | None = None,
@@ -68,9 +71,19 @@ class DeckClient:
             return f.read().decode("utf-8")
 
     def write_text(self, path: str, content: str) -> None:
+        self.write_bytes(path, content.encode("utf-8"))
+
+    def read_bytes(self, path: str) -> bytes:
+        with self._sftp.open(path, "rb") as f:
+            return f.read()
+
+    def write_bytes(self, path: str, content: bytes) -> None:
+        """一時ファイルに書いてから置き換える（書き込み途中で切断されても元のファイルが壊れない）。"""
         self.makedirs(posixpath.dirname(path))
-        with self._sftp.open(path, "w") as f:
-            f.write(content.encode("utf-8"))
+        tmp = f"{path}.kakehashi-tmp"
+        with self._sftp.open(tmp, "wb") as f:
+            f.write(content)
+        self._sftp.posix_rename(tmp, path)
 
     def listdir(self, path: str) -> list[str]:
         return self._sftp.listdir(path)
@@ -210,16 +223,16 @@ def open_deck(settings: SyncSettings, timeout: float = 15) -> Iterator[DeckClien
         ssh.close()
 
 
-def write_with_backup(fs: RemoteFS, path: str, content: str, backup_max: int) -> None:
+def write_with_backup(fs: RemoteFS, path: str, content: str | bytes, backup_max: int) -> None:
     """既存ファイルを `{name}.{日時}.bak` に退避してから書き込み、古いバックアップを間引く。"""
     directory, name = posixpath.split(path)
     if fs.exists(path):
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        fs.write_text(f"{directory}/{name}.{stamp}.bak", fs.read_text(path))
+        fs.write_bytes(f"{directory}/{name}.{stamp}.bak", fs.read_bytes(path))
         backups = sorted(
             f for f in fs.listdir(directory) if f.startswith(f"{name}.") and f.endswith(".bak")
         )
         excess = backups[:-backup_max] if backup_max > 0 else backups
         for old in excess:
             fs.remove(f"{directory}/{old}")
-    fs.write_text(path, content)
+    fs.write_bytes(path, content.encode("utf-8") if isinstance(content, str) else content)

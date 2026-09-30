@@ -7,6 +7,7 @@ import { ErrorBox } from '../../components/ErrorBox'
 import { BulkRegisterDialog } from './BulkRegisterDialog'
 import { DeckImportDialog } from './DeckImportDialog'
 import { DoujinDetail } from './DoujinDetail'
+import { SteamBulkDialog } from './SteamBulkDialog'
 
 type Sort = 'title' | 'circle' | 'updated' | 'created' | 'release'
 
@@ -26,8 +27,9 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [status, setStatus] = useState<PlayStatus | ''>('')
   const [tag, setTag] = useState('')
   const [deckFilter, setDeckFilter] = useState<'' | 'on' | 'off'>('')
+  const [steamFilter, setSteamFilter] = useState<'' | 'on' | 'off'>('')
   const [sort, setSort] = useState<Sort>('title')
-  const [dialog, setDialog] = useState<'bulk' | 'deck' | null>(null)
+  const [dialog, setDialog] = useState<'bulk' | 'deck' | 'steam' | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
   const all = useMemo(() => games.data ?? [], [games.data])
@@ -39,9 +41,10 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
       .filter((g) => !status || g.play_status === status)
       .filter((g) => !tag || g.tags.includes(tag))
       .filter((g) => !deckFilter || (deckFilter === 'on') === !!g.deck_dir)
+      .filter((g) => !steamFilter || (steamFilter === 'on') === !!g.steam_registered_at)
       .filter((g) => !q || [g.title, g.circle, g.work_id, ...g.tags].join(' ').toLowerCase().includes(q))
       .sort(SORTERS[sort])
-  }, [all, query, status, tag, deckFilter, sort])
+  }, [all, query, status, tag, deckFilter, steamFilter, sort])
 
   const current = all.find((g) => g.id === selected) ?? null
 
@@ -72,6 +75,7 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
         </button>
         <button className="btn" onClick={() => setDialog('bulk')}>まとめて登録</button>
         <button className="btn" onClick={() => setDialog('deck')}>Deckから取り込み</button>
+        <button className="btn" onClick={() => setDialog('steam')}>Steamにまとめて反映</button>
         <div className="toolbar-spacer" />
         {notice && <span className="notice">{notice}</span>}
       </div>
@@ -95,6 +99,11 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
                 <option value="">Deck: すべて</option>
                 <option value="on">Deckにある</option>
                 <option value="off">Deckに無い</option>
+              </select>
+              <select value={steamFilter} onChange={(e) => setSteamFilter(e.target.value as '' | 'on' | 'off')} aria-label="Steamへの登録">
+                <option value="">Steam: すべて</option>
+                <option value="on">Steamに登録済み</option>
+                <option value="off">Steamに未登録</option>
               </select>
               <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label="並び順">
                 <option value="title">タイトル順</option>
@@ -124,6 +133,7 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
                   </span>
                   <span className={`status-badge ${g.play_status}`}>{PLAY_STATUS_LABELS[g.play_status]}</span>
                   {g.deck_dir && <span className="badge" title={g.deck_dir}>Deck</span>}
+                  {g.steam_registered_at && <span className="badge" title={`appID ${g.steam_appid}`}>Steam</span>}
                 </li>
               )
             })}
@@ -160,6 +170,17 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
           onRegistered={(created) => {
             created.forEach(upsert)
             setNotice(`${created.length}件を登録しました。`)
+          }}
+        />
+      )}
+      {dialog === 'steam' && (
+        <SteamBulkDialog
+          games={all}
+          onClose={() => setDialog(null)}
+          onOpenSettings={() => { setDialog(null); onOpenSettings() }}
+          onDone={(updated) => {
+            updated.forEach(upsert)
+            setNotice(`Steamに${updated.length}件を反映しました。DeckでSteamを起動すると表示されます。`)
           }}
         />
       )}

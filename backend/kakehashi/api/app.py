@@ -5,11 +5,12 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from kakehashi.api import doujin, esde, jobs, local, media, settings
+from kakehashi.api import doujin, esde, jobs, local, media, settings, steam
 from kakehashi.config import PROJECT_ROOT
 from kakehashi.context import AppContext
 from kakehashi.errors import NotFoundError
 from kakehashi.infra.deck import DeckConnectionError, DeckNotConfiguredError
+from kakehashi.services.steam import SteamRunningError
 
 FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
 
@@ -40,6 +41,7 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
     app.include_router(media.router, prefix="/api/esde")
     app.include_router(media.global_router, prefix="/api/media")
     app.include_router(doujin.router, prefix="/api/doujin")
+    app.include_router(steam.router, prefix="/api/steam")
     app.include_router(jobs.router, prefix="/api/jobs")
     app.include_router(local.router, prefix="/api/local")
 
@@ -50,6 +52,10 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
     @app.exception_handler(DeckConnectionError)
     async def _deck_unreachable(_req: Request, exc: DeckConnectionError):
         return JSONResponse(status_code=502, content={"detail": str(exc), "code": "deck_unreachable"})
+
+    @app.exception_handler(SteamRunningError)
+    async def _steam_running(_req: Request, exc: SteamRunningError):
+        return JSONResponse(status_code=409, content={"detail": str(exc), "code": "steam_running"})
 
     @app.exception_handler(NotFoundError)
     async def _not_found(_req: Request, exc: NotFoundError):

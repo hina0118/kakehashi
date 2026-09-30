@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
-import { api, type Settings } from '../../api'
+import { api, steamApi, type Settings, type SteamUser } from '../../api'
 import { ErrorBox } from '../../components/ErrorBox'
 
 export function SettingsPage() {
@@ -25,6 +25,11 @@ function SettingsForm({ initial }: { initial: Settings }) {
   const [gamelistBase, setGamelistBase] = useState(initial.steam_deck.gamelist_base)
   const [deckMedia, setDeckMedia] = useState(initial.steam_deck.media_base)
   const [doujinBase, setDoujinBase] = useState(initial.steam_deck.doujin_base.join('\n'))
+  const [steamRoot, setSteamRoot] = useState(initial.steam_deck.steam_root)
+  const [steamUser, setSteamUser] = useState(initial.steam_deck.steam_user)
+  const [compatTool, setCompatTool] = useState(initial.steam_deck.default_compat_tool)
+  const [launchOptions, setLaunchOptions] = useState(initial.steam_deck.default_launch_options)
+  const [steamUsers, setSteamUsers] = useState<SteamUser[] | null>(null)
   // 未保存の変更があるうちは、保存済みの設定での接続確認と食い違うため確認させない
   const [dirty, setDirty] = useState(false)
 
@@ -40,6 +45,10 @@ function SettingsForm({ initial }: { initial: Settings }) {
           gamelist_base: gamelistBase,
           media_base: deckMedia,
           doujin_base: lines(doujinBase),
+          steam_root: steamRoot,
+          steam_user: steamUser,
+          default_compat_tool: compatTool,
+          default_launch_options: launchOptions,
         },
         sync: { host, port: Number(port) || 22, username, ...(password ? { password } : {}) },
       }),
@@ -51,6 +60,10 @@ function SettingsForm({ initial }: { initial: Settings }) {
     },
   })
   const test = useMutation({ mutationFn: api.testConnection })
+  const loadUsers = useMutation({
+    mutationFn: steamApi.status,
+    onSuccess: (s) => setSteamUsers(s.users),
+  })
 
   function submit(e: FormEvent) {
     e.preventDefault()
@@ -137,6 +150,57 @@ function SettingsForm({ initial }: { initial: Settings }) {
           <span className="field-label">Deck: 格納先フォルダ（1行に1つ）</span>
           <textarea rows={3} value={doujinBase} onChange={(e) => setDoujinBase(e.target.value)} />
         </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Steam（同人ゲームの登録先）</legend>
+        <label className="field">
+          <span className="field-label">Deck: Steam のフォルダ</span>
+          <input value={steamRoot} onChange={(e) => setSteamRoot(e.target.value)} />
+        </label>
+        <div className="field">
+          <span className="field-label">登録先のSteamアカウント</span>
+          <span className="input-with-btn">
+            {steamUsers ? (
+              <select value={steamUser} onChange={(e) => setSteamUser(e.target.value)}>
+                <option value="">自動（アカウントが1つだけのとき）</option>
+                {steamUsers.map((u) => (
+                  <option key={u.account_id} value={u.account_id}>
+                    {u.persona_name || u.account_name || u.account_id}（{u.account_id}）
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input value={steamUser} placeholder="自動（アカウントが1つだけのとき）" onChange={(e) => setSteamUser(e.target.value)} />
+            )}
+            <button
+              type="button"
+              className="btn small"
+              disabled={loadUsers.isPending || dirty}
+              title={dirty ? '接続設定を保存してから読み込みます' : undefined}
+              onClick={() => loadUsers.mutate()}
+            >
+              {loadUsers.isPending ? '読み込み中…' : 'Deckから読み込む'}
+            </button>
+          </span>
+        </div>
+        {loadUsers.error && <ErrorBox error={loadUsers.error} />}
+        <div className="form-row">
+          <label className="field grow">
+            <span className="field-label">既定の互換ツール</span>
+            <input value={compatTool} list="compat-tools" onChange={(e) => setCompatTool(e.target.value)} />
+            <datalist id="compat-tools">
+              {['proton_experimental', 'proton_hotfix', 'proton_9', 'proton_8'].map((t) => <option key={t} value={t} />)}
+            </datalist>
+          </label>
+          <label className="field grow">
+            <span className="field-label">既定の起動オプション</span>
+            <input value={launchOptions} onChange={(e) => setLaunchOptions(e.target.value)} />
+          </label>
+        </div>
+        <p className="hint">
+          起動オプションの既定値 <code>LANG=ja_JP.UTF-8 %command%</code> は、Shift-JISで作られたゲームの文字化けを防ぎます。
+        </p>
       </fieldset>
 
       <div className="form-actions sticky">

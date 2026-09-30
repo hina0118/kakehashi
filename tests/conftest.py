@@ -14,17 +14,33 @@ from kakehashi.infra.deck import TransferResult
 class MemoryFS:
     """RemoteFS のインメモリ実装。ディレクトリはファイルパスから暗黙に存在するものとする。"""
 
-    def __init__(self, files: dict[str, str] | None = None) -> None:
-        self.files: dict[str, str] = dict(files or {})
+    def __init__(self, files: dict[str, str | bytes] | None = None) -> None:
+        self.files: dict[str, str | bytes] = dict(files or {})
         self.connections = 0
+        self.steam_running = False
+        self.commands: list[str] = []
 
     def read_text(self, path: str) -> str:
-        if path not in self.files:
-            raise FileNotFoundError(path)
-        return self.files[path]
+        data = self.read_bytes(path)
+        return data.decode("utf-8")
 
     def write_text(self, path: str, content: str) -> None:
         self.files[path] = content
+
+    def read_bytes(self, path: str) -> bytes:
+        if path not in self.files:
+            raise FileNotFoundError(path)
+        c = self.files[path]
+        return c.encode("utf-8") if isinstance(c, str) else c
+
+    def write_bytes(self, path: str, content: bytes) -> None:
+        self.files[path] = content
+
+    def run(self, command: str, timeout: float = 30) -> tuple[int, str, str]:
+        self.commands.append(command)
+        if "pgrep" in command:
+            return 0, ("running" if self.steam_running else "stopped") + "\n", ""
+        return 0, "", ""
 
     def listdir(self, path: str) -> list[str]:
         prefix = path.rstrip("/") + "/"

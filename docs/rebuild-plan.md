@@ -46,7 +46,7 @@ tests/                 pytest
 | 1 | ES-DE メタデータ：機種一覧、ゲーム一覧/検索、編集、差分プッシュ、未登録ROM検出、Web検索/翻訳リンク。MCP を新サービスへ移行 | 完了 |
 | 2 | メディア：存在チェック、サムネイル配信、3Dボックス・miximage・AIロゴ生成、動画（yt-dlp）、Deck へのメディア転送・ROM追加 | 完了 |
 | 3 | 同人台帳：フォルダ登録、メタデータ編集（サークル・作品ID・タグ・プレイ状況・起動exe）、カバー画像、Deck への転送 | 完了 |
-| 4 | Steam 登録：`shortcuts.vdf`（バイナリVDF）への追加、appid 算出、グリッド画像、Proton 設定（`config.vdf` の CompatToolMapping）、Steam 起動中チェック | |
+| 4 | Steam 登録：`shortcuts.vdf`（バイナリVDF）への追加、appid 算出、グリッド画像、Proton 設定（`config.vdf` の CompatToolMapping）、Steam 起動中チェック | 完了（実機での確認待ち） |
 | 5 | 旧 tkinter アプリ（`src/`）の削除、README 更新、main へマージ | |
 
 ## メディアの扱い（Phase 2）
@@ -76,10 +76,19 @@ tests/                 pytest
 - 更新系API（GET以外）は `X-Kakehashi: 1` ヘッダが必須。独自ヘッダはCORSのプリフライト対象になるため、他サイトのページからの操作（CSRF）を防げる。
 - Host ヘッダが `127.0.0.1` / `localhost` 以外のリクエストは拒否する（DNSリバインディング対策）。
 
-## Steam 登録の注意点（Phase 4）
+## Steam 登録（Phase 4）
 
-- Steam は起動中に `shortcuts.vdf` をメモリに保持し、終了時に上書きする。書き込みは Steam が停止している間だけ行い、実行前に Deck 側のプロセスを確認する。
-- 非Steamゲームの appid は `crc32(exe + name) | 0x80000000` で決まる。グリッド画像のファイル名（`{appid}p.png` など）もこの値から作る。
+- 書き込むもの:
+  - `{steam_root}/userdata/{アカウント}/config/shortcuts.vdf` … 非Steamゲームの一覧（バイナリVDF）
+  - `{steam_root}/userdata/{アカウント}/config/grid/` … `{appid}p.png`（縦長 600×900）/ `{appid}.png`（横長 920×430）/ `{appid}_hero.png`（1920×620）/ `{appid}_logo.png` / `{appid}_icon.png`
+  - `{steam_root}/config/config.vdf` … `CompatToolMapping` に Proton を割り当て（起動ファイルが .exe/.bat などのときだけ）
+- Steam は起動中これらをメモリに保持し、終了時に上書きする。書き込み前に Deck で `pgrep -x steam` を確認し、起動中なら何も書かずに中止する。
+- 書き込み前に `shortcuts.vdf` と `config.vdf` を世代バックアップする（`backup_max`）。Deck への書き込みは一時ファイル経由で置き換える。
+- バイナリVDF・テキストVDFとも、kakehashi が知らないキー・型・重複キー・順序を保ったまま書き戻す。既存エントリはプレイ時間・非表示・タグなど Steam 側の項目を残し、名前・起動ファイル・作業フォルダ・アイコン・起動オプションだけを書き換える。
+- appID は初回に `crc32(引用符付きexe + 名前) | 0x80000000` で決めて `shortcuts.vdf` に明示的に書き、台帳にも保存する。以降はタイトルや起動ファイルを変えても同じ appID のエントリを更新する（Steam 側の記録が別ゲームにならない）。Steam から外しても appID は台帳に残し、再登録で同じ ID を使う。
+- 画像は台帳の cover/header/hero から各サイズを作る（比率の差が12%以内なら切り抜き、それ以上はぼかした背景に収める）。ロゴとアイコンは台帳にあるときだけ送り、台帳から消したものは Deck からも消す。
+- 起動オプションの既定は `LANG=ja_JP.UTF-8 %command%`（Shift-JIS のゲームの文字化け対策）。互換ツールの既定は `proton_experimental`。どちらも作品ごとに上書きできる。
+- 登録先アカウントは `steam_deck.steam_user`。空なら `userdata/` にアカウントが1つだけのときに自動で選ぶ。
 
 ## 開発版の起動方法
 

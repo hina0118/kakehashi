@@ -13,6 +13,7 @@ from kakehashi.services.esde import EsdeService
 from kakehashi.services.jobs import JobManager
 from kakehashi.services.media import MediaService
 from kakehashi.services.previews import PreviewStore
+from kakehashi.services.steam import SteamService
 
 
 class AppContext:
@@ -55,5 +56,13 @@ class AppContext:
     def doujin(self) -> DoujinService:
         return DoujinService(
             lambda: self._config, self._connector(),
-            DoujinDB(data_dir() / "doujin.db"), data_dir() / "doujin_images",
+            self._doujin_db, data_dir() / "doujin_images",
         )
+
+    @cached_property
+    def _doujin_db(self) -> DoujinDB:
+        return DoujinDB(data_dir() / "doujin.db")
+
+    @cached_property
+    def steam(self) -> SteamService:
+        return SteamService(lambda: self._config, self._connector(), self.doujin, self._doujin_db)

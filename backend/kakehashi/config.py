@@ -43,6 +43,12 @@ class DeckPaths(_Section):
     gamelist_base: str = "/home/deck/.emulationstation/gamelists"
     media_base: str = "/home/deck/.emulationstation/downloaded_media"
     doujin_base: list[str] = Field(default_factory=list)
+    steam_root: str = "/home/deck/.local/share/Steam"
+    steam_user: str = ""
+    """非Steamゲームを登録するSteamアカウント（userdata/ 配下のフォルダ名）。空なら1つしか無いときに自動で選ぶ。"""
+    default_compat_tool: str = "proton_experimental"
+    default_launch_options: str = "LANG=ja_JP.UTF-8 %command%"
+    """Shift-JISの同人ゲームが文字化けしにくいよう、既定で日本語ロケールにする。"""
 
     def gamelist_path(self, system: str) -> str:
         return f"{self.gamelist_base.rstrip('/')}/{system}/gamelist.xml"

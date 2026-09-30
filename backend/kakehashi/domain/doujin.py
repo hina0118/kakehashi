@@ -17,6 +17,7 @@ ImageKind = Literal["cover", "header", "hero", "logo", "icon"]
 EDITABLE_FIELDS = (
     "title", "circle", "work_id", "store", "url", "tags", "description", "release_date",
     "play_status", "rating", "notes", "local_path", "exe", "deck_dir",
+    "launch_options", "compat_tool",
 )
 
 
@@ -48,6 +49,14 @@ class DoujinGame(BaseModel):
     deck_dir: str = ""
     """Steam Deck上の作品フォルダ。"""
     transferred_at: datetime | None = None
+    launch_options: str = ""
+    """Steamの起動オプション。空なら設定の既定値を使う。"""
+    compat_tool: str = ""
+    """Proton などの互換ツール名。空なら設定の既定値を使う。"""
+    steam_appid: int | None = None
+    """Steamに登録したときの appID（符号なし）。タイトルを変えても同じIDで更新するため保持し続ける。"""
+    steam_registered_at: datetime | None = None
+    """Steamに登録中なら登録日時、外したら None。"""
     created_at: datetime
     updated_at: datetime
     images: dict[str, DoujinImage] = Field(default_factory=dict)
@@ -69,6 +78,8 @@ class DoujinPatch(BaseModel):
     local_path: str | None = None
     exe: str | None = None
     deck_dir: str | None = None
+    launch_options: str | None = None
+    compat_tool: str | None = None
 
     def changes(self) -> dict:
         # rating は None（未評価）に戻す操作もあるため、明示的に指定されたかで判定する

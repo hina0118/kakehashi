@@ -15,7 +15,16 @@ export type Settings = {
   systems: string[]
   backup_max: number
   windows: { media_base: string }
-  steam_deck: { rom_base: string; gamelist_base: string; media_base: string; doujin_base: string[] }
+  steam_deck: {
+    rom_base: string
+    gamelist_base: string
+    media_base: string
+    doujin_base: string[]
+    steam_root: string
+    steam_user: string
+    default_compat_tool: string
+    default_launch_options: string
+  }
   sync: { host: string; port: number; username: string; password_set: boolean }
 }
 
@@ -189,12 +198,18 @@ export type DoujinGame = {
   exe: string
   deck_dir: string
   transferred_at: string | null
+  launch_options: string
+  compat_tool: string
+  steam_appid: number | null
+  steam_registered_at: string | null
   created_at: string
   updated_at: string
   images: Partial<Record<DoujinImageKind, { kind: DoujinImageKind; filename: string; mtime: number }>>
 }
 
-export type DoujinPatch = Partial<Omit<DoujinGame, 'id' | 'images' | 'transferred_at' | 'created_at' | 'updated_at'>>
+export type DoujinPatch = Partial<
+  Omit<DoujinGame, 'id' | 'images' | 'transferred_at' | 'created_at' | 'updated_at' | 'steam_appid' | 'steam_registered_at'>
+>
 
 export type FolderGuess = { title: string; circle: string; work_id: string; store: string; url: string }
 export type FolderCandidate = { path: string; name: string; guess: FolderGuess; registered_id: number | null }
@@ -250,4 +265,29 @@ export const doujinApi = {
     ),
   scanDeck: () => post<DeckFolder[]>('/api/doujin/deck/scan'),
   importFromDeck: (paths: string[]) => post<DoujinGame[]>('/api/doujin/deck/import', { paths }),
+}
+
+// ---- Steam ----
+
+export type SteamUser = { account_id: string; account_name: string; persona_name: string; most_recent: boolean }
+export type SteamStatus = {
+  running: boolean
+  users: SteamUser[]
+  user: SteamUser | null
+  problem: string | null
+  registered_appids: number[]
+}
+export type SteamGameResult = { id: number; title: string; appid: number | null; action: string; error: string | null }
+
+export const STEAM_ART_KINDS = ['portrait', 'header', 'hero', 'logo', 'icon'] as const
+export type SteamArtKind = (typeof STEAM_ART_KINDS)[number]
+
+export const steamArtUrl = (g: DoujinGame, kind: SteamArtKind) =>
+  `/api/steam/art/${g.id}/${kind}.png?v=${encodeURIComponent(g.updated_at + JSON.stringify(g.images))}`
+
+export const steamApi = {
+  status: () => request<SteamStatus>('/api/steam/status'),
+  compatTools: () => request<string[]>('/api/steam/compat-tools'),
+  apply: (ids: number[]) => post<JobView<SteamGameResult[]>>('/api/steam/apply', { ids }),
+  remove: (ids: number[]) => post<JobView<SteamGameResult[]>>('/api/steam/remove', { ids }),
 }

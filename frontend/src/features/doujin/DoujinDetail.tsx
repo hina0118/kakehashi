@@ -7,13 +7,14 @@ import { ErrorBox } from '../../components/ErrorBox'
 import { useRunJob } from '../../lib/jobs'
 import { DlsiteDialog, type DlsiteApply } from './DlsiteDialog'
 import { DoujinImages } from './DoujinImages'
+import { SteamSection } from './SteamSection'
 import { TagInput } from './TagInput'
 
 type Draft = Required<Omit<DoujinPatch, 'rating'>> & { rating: number | null }
 
 const FIELDS = [
   'title', 'circle', 'work_id', 'store', 'url', 'tags', 'description', 'release_date',
-  'play_status', 'rating', 'notes', 'local_path', 'exe', 'deck_dir',
+  'play_status', 'rating', 'notes', 'local_path', 'exe', 'deck_dir', 'launch_options', 'compat_tool',
 ] as const
 
 const STORES = [
@@ -252,6 +253,16 @@ export function DoujinDetail({ game, allTags, onSaved, onDeleted, onOpenSettings
           <input value={draft.deck_dir} placeholder="（未転送）" onChange={(e) => set('deck_dir', e.target.value)} />
         </label>
       </fieldset>
+
+      <SteamSection
+        game={game}
+        compatTool={draft.compat_tool}
+        launchOptions={draft.launch_options}
+        onCompatTool={(v) => set('compat_tool', v)}
+        onLaunchOptions={(v) => set('launch_options', v)}
+        onDone={onSaved}
+        dirty={!!pendingKeys || saving}
+      />
 
       {showDlsite && (
         <DlsiteDialog workId={draft.work_id.trim()} current={draft} hasCover={!!game.images.cover} onApply={applyDlsite} onClose={() => setShowDlsite(false)} />

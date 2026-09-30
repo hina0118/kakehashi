@@ -34,11 +34,18 @@ _MIGRATIONS = [
     );
     CREATE INDEX idx_doujin_work_id ON doujin_games(work_id);
     """,
+    """
+    ALTER TABLE doujin_games ADD COLUMN launch_options TEXT NOT NULL DEFAULT '';
+    ALTER TABLE doujin_games ADD COLUMN compat_tool TEXT NOT NULL DEFAULT '';
+    ALTER TABLE doujin_games ADD COLUMN steam_appid INTEGER;
+    ALTER TABLE doujin_games ADD COLUMN steam_registered_at TEXT;
+    """,
 ]
 
 _COLUMNS = (
     "title", "circle", "work_id", "store", "url", "tags", "description", "release_date",
     "play_status", "rating", "notes", "local_path", "exe", "deck_dir", "transferred_at",
+    "launch_options", "compat_tool", "steam_appid", "steam_registered_at",
 )
 
 
@@ -108,8 +115,9 @@ def _encode(data: dict) -> dict:
     out = dict(data)
     if "tags" in out:
         out["tags"] = json.dumps(out["tags"] or [], ensure_ascii=False)
-    if isinstance(out.get("transferred_at"), datetime):
-        out["transferred_at"] = out["transferred_at"].isoformat(timespec="seconds")
+    for key in ("transferred_at", "steam_registered_at"):
+        if isinstance(out.get(key), datetime):
+            out[key] = out[key].isoformat(timespec="seconds")
     return out
 
 

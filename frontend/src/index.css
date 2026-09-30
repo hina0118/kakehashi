@@ -1328,6 +1328,95 @@ textarea {
   cursor: default;
 }
 
+/* ---- Steam ---- */
+
+.steam-art {
+  display: grid;
+  grid-template-columns: 90px 1.6fr 2.6fr 1fr 60px;
+  gap: 8px;
+  align-items: end;
+}
+
+.steam-art-item {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.steam-art-item figcaption {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.steam-art-frame {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.steam-art-item.portrait .steam-art-frame {
+  aspect-ratio: 600 / 900;
+}
+
+.steam-art-item.header .steam-art-frame {
+  aspect-ratio: 920 / 430;
+}
+
+.steam-art-item.hero .steam-art-frame {
+  aspect-ratio: 1920 / 620;
+}
+
+.steam-art-item.logo .steam-art-frame {
+  aspect-ratio: 16 / 9;
+}
+
+.steam-art-item.icon .steam-art-frame {
+  aspect-ratio: 1;
+}
+
+.steam-art-frame img {
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+}
+
+.steam-state {
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.steam-state.ok {
+  background: #e3f5e9;
+  color: #2e7d4f;
+}
+
+.steam-state.ng {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+@media (prefers-color-scheme: dark) {
+  .steam-state.ok {
+    background: #1d3a29;
+    color: #7fd3a0;
+  }
+}
+
+.coverage-table td.ng {
+  color: var(--danger);
+}
+
 /* ---- 狭い画面 ---- */
 
 @media (max-width: 720px) {
@@ -1343,6 +1432,10 @@ textarea {
 
   .doujin-images {
     max-width: 240px;
+  }
+
+  .steam-art {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .game-list {
