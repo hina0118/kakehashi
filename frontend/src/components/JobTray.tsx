@@ -6,13 +6,18 @@ import { api, type JobView } from '../api'
 export function JobTray() {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const [expanded, setExpanded] = useState<string | null>(null)
+  // ページを開く前に終わったジョブは出さない（サーバには直近のジョブが残っている）
+  const [openedAt] = useState(() => new Date())
   const jobs = useQuery({
     queryKey: ['jobs'],
     queryFn: api.jobs,
     refetchInterval: (q) => (q.state.data?.some((j) => j.status === 'running') ? 1000 : false),
   })
 
-  const visible = (jobs.data ?? []).filter((j) => !dismissed.has(j.id)).slice(0, 5)
+  const visible = (jobs.data ?? [])
+    .filter((j) => !dismissed.has(j.id))
+    .filter((j) => j.status === 'running' || (j.finished_at && new Date(j.finished_at) >= openedAt))
+    .slice(0, 5)
   const finishedOk = visible.filter((j) => j.status === 'done' && j.id !== expanded).map((j) => j.id).join(',')
 
   // 成功したジョブは少し経ったら自動で閉じる（失敗したものは内容を確認できるよう残す）

@@ -47,6 +47,14 @@ class MemoryFS:
             for p, c in self.files.items() if p.startswith(prefix) and "/" not in p[len(prefix):]
         }
 
+    def list_dirs(self, path: str) -> list[str]:
+        prefix = path.rstrip("/") + "/"
+        return sorted({p[len(prefix):].split("/", 1)[0] for p in self.files if p.startswith(prefix) and "/" in p[len(prefix):]})
+
+    def walk_files(self, path: str):
+        prefix = path.rstrip("/") + "/"
+        return iter(sorted(p for p in self.files if p.startswith(prefix)))
+
     def upload(self, tasks, overwrite=False, on_progress=None) -> TransferResult:
         res = TransferResult()
         for i, (local, remote) in enumerate(tasks, 1):

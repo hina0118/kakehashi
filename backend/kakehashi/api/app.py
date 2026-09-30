@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from kakehashi.api import esde, jobs, local, media, settings
+from kakehashi.api import doujin, esde, jobs, local, media, settings
 from kakehashi.config import PROJECT_ROOT
 from kakehashi.context import AppContext
 from kakehashi.errors import NotFoundError
@@ -39,6 +39,7 @@ def create_app(ctx: AppContext | None = None) -> FastAPI:
     app.include_router(esde.router, prefix="/api/esde")
     app.include_router(media.router, prefix="/api/esde")
     app.include_router(media.global_router, prefix="/api/media")
+    app.include_router(doujin.router, prefix="/api/doujin")
     app.include_router(jobs.router, prefix="/api/jobs")
     app.include_router(local.router, prefix="/api/local")
 

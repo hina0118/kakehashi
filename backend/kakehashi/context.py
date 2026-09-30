@@ -6,7 +6,9 @@ from functools import cached_property
 
 from kakehashi.config import Config, data_dir, load_config, save_config
 from kakehashi.infra.deck import TransferFS, open_deck
+from kakehashi.infra.doujin_db import DoujinDB
 from kakehashi.infra.media_store import PendingDeletions
+from kakehashi.services.doujin import DoujinService
 from kakehashi.services.esde import EsdeService
 from kakehashi.services.jobs import JobManager
 from kakehashi.services.media import MediaService
@@ -47,4 +49,11 @@ class AppContext:
             lambda: self._config, self._connector(),
             PendingDeletions(data_dir() / "pending_media_deletions.json"),
             PreviewStore(),
+        )
+
+    @cached_property
+    def doujin(self) -> DoujinService:
+        return DoujinService(
+            lambda: self._config, self._connector(),
+            DoujinDB(data_dir() / "doujin.db"), data_dir() / "doujin_images",
         )

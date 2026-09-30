@@ -10,6 +10,7 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from kakehashi.context import AppContext
+from kakehashi.domain.doujin import DoujinPatch
 from kakehashi.domain.esde import EDITABLE_FIELDS, GameUpdate
 from kakehashi.domain.media import rom_stem
 
@@ -101,6 +102,57 @@ def update_videos(system: str, updates: list[dict]) -> dict:
         except Exception as e:
             errors.append({"path": path, "error": str(e)})
     return {"applied": applied, "requested": len(updates), "errors": errors}
+
+
+_DOUJIN_SUMMARY = ("id", "title", "circle", "work_id", "play_status", "tags")
+
+
+@mcp.tool()
+def list_doujin(query: str = "") -> list[dict]:
+    """同人ゲーム台帳の一覧（id, title, circle, work_id, play_status, tags）を返す。
+
+    query: タイトル・サークル・作品ID・タグの部分一致で絞り込む（大文字小文字は区別しない）。
+    """
+    q = query.strip().lower()
+    games = _ctx.doujin.list()
+    if q:
+        games = [
+            g for g in games
+            if q in " ".join([g.title, g.circle, g.work_id, *g.tags]).lower()
+        ]
+    return [g.model_dump(include=set(_DOUJIN_SUMMARY)) for g in games]
+
+
+@mcp.tool()
+def get_doujin(ids: list[int]) -> list[dict]:
+    """同人ゲームの全項目をまとめて取得する。"""
+    return [_ctx.doujin.get(i).model_dump(mode="json", exclude={"images"}) for i in ids]
+
+
+@mcp.tool()
+def update_doujin(updates: list[dict]) -> dict:
+    """同人ゲームのメタデータをまとめて更新する。
+
+    updates: [{"id": 1, "fields": {"title": "...", "tags": ["RPG"], ...}}, ...]
+    fields のキー: title, circle, work_id, store, url, tags(文字列の配列), description,
+    release_date(YYYY-MM-DD), play_status(unplayed/playing/cleared/completed/onhold),
+    rating(0-5 または null), notes, exe(作品フォルダからの相対パス)
+    戻り値: {"applied", "requested", "errors": [{"id", "error"}, ...]}
+    """
+    applied, errors = 0, []
+    for item in updates:
+        try:
+            _ctx.doujin.update(int(item["id"]), DoujinPatch.model_validate(item["fields"]))
+            applied += 1
+        except Exception as e:
+            errors.append({"id": item.get("id"), "error": str(e)})
+    return {"applied": applied, "requested": len(updates), "errors": errors}
+
+
+@mcp.tool()
+def fetch_dlsite(work_id: str) -> dict:
+    """DLsiteの作品ID（RJ01234567 など）から、タイトル・サークル・発売日・ジャンル・画像URLを取得する。"""
+    return _ctx.doujin.fetch_dlsite(work_id).model_dump()
 
 
 def run() -> None:

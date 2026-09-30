@@ -156,3 +156,98 @@ export const api = {
     post<string[]>('/api/local/pick', { mode, title, filetypes }),
   testConnection: () => post<{ ok: boolean; message: string }>('/api/settings/test-connection'),
 }
+
+// ---- 同人ゲーム ----
+
+export const PLAY_STATUSES = ['unplayed', 'playing', 'cleared', 'completed', 'onhold'] as const
+export type PlayStatus = (typeof PLAY_STATUSES)[number]
+export const PLAY_STATUS_LABELS: Record<PlayStatus, string> = {
+  unplayed: '未プレイ',
+  playing: 'プレイ中',
+  cleared: 'クリア',
+  completed: 'やり込み済み',
+  onhold: '中断',
+}
+
+export const DOUJIN_IMAGE_KINDS = ['cover', 'header', 'hero', 'logo', 'icon'] as const
+export type DoujinImageKind = (typeof DOUJIN_IMAGE_KINDS)[number]
+
+export type DoujinGame = {
+  id: number
+  title: string
+  circle: string
+  work_id: string
+  store: string
+  url: string
+  tags: string[]
+  description: string
+  release_date: string
+  play_status: PlayStatus
+  rating: number | null
+  notes: string
+  local_path: string
+  exe: string
+  deck_dir: string
+  transferred_at: string | null
+  created_at: string
+  updated_at: string
+  images: Partial<Record<DoujinImageKind, { kind: DoujinImageKind; filename: string; mtime: number }>>
+}
+
+export type DoujinPatch = Partial<Omit<DoujinGame, 'id' | 'images' | 'transferred_at' | 'created_at' | 'updated_at'>>
+
+export type FolderGuess = { title: string; circle: string; work_id: string; store: string; url: string }
+export type FolderCandidate = { path: string; name: string; guess: FolderGuess; registered_id: number | null }
+export type DeckFolder = {
+  base: string
+  name: string
+  path: string
+  guess: FolderGuess
+  linked_id: number | null
+  match_id: number | null
+}
+export type DlsiteInfo = {
+  work_id: string
+  title: string
+  circle: string
+  release_date: string
+  genres: string[]
+  image_url: string
+  url: string
+  work_type: string
+}
+
+const dj = (id: number) => `/api/doujin/games/${id}`
+
+export function doujinImageUrl(g: DoujinGame, kind: DoujinImageKind, width?: number): string | null {
+  const img = g.images[kind]
+  if (!img) return null
+  const q = new URLSearchParams({ v: String(img.mtime) })
+  if (width) q.set('w', String(width))
+  return `${dj(g.id)}/images/${kind}?${q}`
+}
+
+export const doujinApi = {
+  list: () => request<DoujinGame[]>('/api/doujin/games'),
+  get: (id: number) => request<DoujinGame>(dj(id)),
+  register: (path: string) => post<DoujinGame>('/api/doujin/games', { path }),
+  scanFolder: (path: string) => post<FolderCandidate[]>('/api/doujin/scan-folder', { path }),
+  registerMany: (paths: string[]) => post<DoujinGame[]>('/api/doujin/games/register-many', { paths }),
+  update: (id: number, patch: DoujinPatch) =>
+    request<DoujinGame>(dj(id), { method: 'PATCH', body: JSON.stringify(patch) }),
+  remove: (id: number) => request<{ deleted: number }>(dj(id), { method: 'DELETE' }),
+  exeCandidates: (id: number) => request<string[]>(`${dj(id)}/exe-candidates`),
+  importImageFile: (id: number, kind: DoujinImageKind, source: string) =>
+    post<DoujinGame>(`${dj(id)}/images/${kind}/import-file`, { source }),
+  importImageUrl: (id: number, kind: DoujinImageKind, url: string) =>
+    post<DoujinGame>(`${dj(id)}/images/${kind}/import-url`, { url }),
+  deleteImage: (id: number, kind: DoujinImageKind) =>
+    request<DoujinGame>(`${dj(id)}/images/${kind}`, { method: 'DELETE' }),
+  dlsite: (workId: string) => request<DlsiteInfo>(`/api/doujin/dlsite/${encodeURIComponent(workId)}`),
+  transfer: (id: number, base: string | null, overwrite = false) =>
+    post<JobView<{ deck_dir: string; transferred: number; skipped: number; errors: string[] }>>(
+      `${dj(id)}/transfer`, { base, overwrite },
+    ),
+  scanDeck: () => post<DeckFolder[]>('/api/doujin/deck/scan'),
+  importFromDeck: (paths: string[]) => post<DoujinGame[]>('/api/doujin/deck/import', { paths }),
+}

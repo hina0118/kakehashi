@@ -565,7 +565,8 @@ textarea {
   align-items: center;
   justify-content: center;
   padding: 16px;
-  z-index: 20;
+  /* ジョブの進捗表示より手前に出す */
+  z-index: 40;
 }
 
 .modal {
@@ -989,6 +990,344 @@ textarea {
   background: var(--danger-soft);
 }
 
+/* ---- 同人ゲーム ---- */
+
+.doujin {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.game-list-filters.wrap {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.game-list-filters.wrap select {
+  flex: 1 1 130px;
+  font-size: 13px;
+  padding: 4px 6px;
+}
+
+.doujin-row {
+  padding: 6px 10px;
+}
+
+.doujin-thumb {
+  width: 32px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.doujin-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.doujin-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.doujin-row-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  white-space: nowrap;
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+.status-badge.playing {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.status-badge.cleared,
+.status-badge.completed {
+  background: #e3f5e9;
+  color: #2e7d4f;
+}
+
+.status-badge.onhold {
+  background: var(--changed-soft);
+  color: var(--changed);
+}
+
+@media (prefers-color-scheme: dark) {
+  .status-badge.cleared,
+  .status-badge.completed {
+    background: #1d3a29;
+    color: #7fd3a0;
+  }
+}
+
+.empty-hint {
+  padding: 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.empty-hint p {
+  margin: 0 0 8px;
+}
+
+.save-state {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.doujin-top {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.doujin-images {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.image-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.image-kinds button {
+  border: 1px solid transparent;
+  background: none;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.image-kinds button.has {
+  color: var(--text);
+}
+
+.image-kinds button.has::after {
+  content: " ●";
+  color: #2e9d57;
+  font-size: 8px;
+  vertical-align: middle;
+}
+
+.image-kinds button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.doujin-image-frame {
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  text-align: center;
+  padding: 4px;
+}
+
+.doujin-image-frame.header {
+  aspect-ratio: 920 / 430;
+}
+
+.doujin-image-frame.hero {
+  aspect-ratio: 1920 / 620;
+}
+
+.doujin-image-frame.logo {
+  aspect-ratio: 16 / 9;
+}
+
+.doujin-image-frame.icon {
+  aspect-ratio: 1;
+}
+
+.doujin-image-frame img {
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+}
+
+.doujin-image-frame .thumb-btn {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.doujin-images .media-actions {
+  padding: 0;
+}
+
+.input-with-btn {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.input-with-btn input {
+  flex: 1;
+}
+
+.doujin-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px 16px;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.doujin-section legend {
+  font-weight: 600;
+  padding: 0 4px;
+}
+
+.transfer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+}
+
+.transfer .error-box {
+  margin: 0;
+}
+
+.transfer-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.chip.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.chip button {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.tag-input {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 4px 6px;
+}
+
+.tag-input input {
+  border: none;
+  flex: 1;
+  min-width: 120px;
+  padding: 2px 4px;
+  background: transparent;
+}
+
+.tag-input input:focus {
+  outline: none;
+}
+
+.tag-input:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.dlsite {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.dlsite-image {
+  width: 100%;
+  border-radius: var(--radius);
+}
+
+.dlsite-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+
+.dlsite-table th,
+.dlsite-table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--surface-2);
+  vertical-align: top;
+}
+
+.dlsite-table tbody tr {
+  cursor: pointer;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.candidate-table tr.done {
+  opacity: 0.55;
+  cursor: default;
+}
+
 /* ---- 狭い画面 ---- */
 
 @media (max-width: 720px) {
@@ -996,8 +1335,14 @@ textarea {
     flex-direction: column;
   }
 
-  .gen-layout {
+  .gen-layout,
+  .doujin-top,
+  .dlsite {
     grid-template-columns: 1fr;
+  }
+
+  .doujin-images {
+    max-width: 240px;
   }
 
   .game-list {

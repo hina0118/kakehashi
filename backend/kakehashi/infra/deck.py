@@ -34,6 +34,8 @@ class RemoteFS(Protocol):
 class TransferFS(RemoteFS, Protocol):
     """ファイル転送もできる RemoteFS。"""
     def list_files(self, path: str) -> dict[str, int]: ...
+    def list_dirs(self, path: str) -> list[str]: ...
+    def walk_files(self, path: str) -> Iterator[str]: ...
     def upload(
         self, tasks: list[tuple[Path, str]], overwrite: bool = False,
         on_progress: Callable[[int, int], None] | None = None,
@@ -104,6 +106,14 @@ class DeckClient:
             e.filename: e.st_size or 0
             for e in entries if not (e.st_mode and _stat.S_ISDIR(e.st_mode))
         }
+
+    def list_dirs(self, path: str) -> list[str]:
+        """path直下のフォルダ名。フォルダが無ければ空。"""
+        try:
+            entries = self._sftp.listdir_attr(path)
+        except FileNotFoundError:
+            return []
+        return sorted(e.filename for e in entries if e.st_mode and _stat.S_ISDIR(e.st_mode))
 
     def walk_files(self, path: str) -> Iterator[str]:
         """path配下のファイルを再帰的に列挙する（存在しなければ何も返さない）。"""

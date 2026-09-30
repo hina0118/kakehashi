@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { JobTray } from './components/JobTray'
+import { DoujinPage } from './features/doujin/DoujinPage'
 import { EsdePage } from './features/esde/EsdePage'
 import { SettingsPage } from './features/settings/SettingsPage'
 
@@ -7,12 +8,17 @@ type Page = 'esde' | 'doujin' | 'settings'
 
 const NAV: { id: Page; label: string; disabled?: boolean }[] = [
   { id: 'esde', label: 'ES-DE' },
-  { id: 'doujin', label: '同人ゲーム', disabled: true },
+  { id: 'doujin', label: '同人ゲーム' },
   { id: 'settings', label: '設定' },
 ]
 
 export default function App() {
-  const [page, setPage] = useState<Page>('esde')
+  const [page, setPageState] = useState<Page>('esde')
+  const [visited, setVisited] = useState<Set<Page>>(new Set(['esde']))
+  const setPage = (p: Page) => {
+    setPageState(p)
+    setVisited((v) => (v.has(p) ? v : new Set(v).add(p)))
+  }
 
   return (
     <div className="app">
@@ -37,6 +43,12 @@ export default function App() {
         <div className="page" hidden={page !== 'esde'}>
           <EsdePage onOpenSettings={() => setPage('settings')} />
         </div>
+        {/* 絞り込み状態を保つため、一度開いたら破棄しない */}
+        {visited.has('doujin') && (
+          <div className="page" hidden={page !== 'doujin'}>
+            <DoujinPage onOpenSettings={() => setPage('settings')} />
+          </div>
+        )}
         {page === 'settings' && (
           <div className="page">
             <SettingsPage />
