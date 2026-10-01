@@ -19,6 +19,8 @@ class MemoryFS:
         self.connections = 0
         self.steam_running = False
         self.commands: list[str] = []
+        self.mtimes: dict[str, int] = {}
+        self._clock = 1000
 
     def read_text(self, path: str) -> str:
         data = self.read_bytes(path)
@@ -26,6 +28,18 @@ class MemoryFS:
 
     def write_text(self, path: str, content: str) -> None:
         self.files[path] = content
+        self.touch(path)
+
+    def touch(self, path: str) -> None:
+        """更新日時を進める（Steam側でファイルが変わったことを表すのにも使う）。"""
+        self._clock += 1
+        self.mtimes[path] = self._clock
+
+    def list_attrs(self, path: str) -> dict[str, tuple[int, int]]:
+        return {
+            name: (size, self.mtimes.get(f"{path.rstrip('/')}/{name}", 0))
+            for name, size in self.list_files(path).items()
+        }
 
     def read_bytes(self, path: str) -> bytes:
         if path not in self.files:
@@ -35,6 +49,7 @@ class MemoryFS:
 
     def write_bytes(self, path: str, content: bytes) -> None:
         self.files[path] = content
+        self.touch(path)
 
     def run(self, command: str, timeout: float = 30) -> tuple[int, str, str]:
         self.commands.append(command)
@@ -59,7 +74,7 @@ class MemoryFS:
     def list_files(self, path: str) -> dict[str, int]:
         prefix = path.rstrip("/") + "/"
         return {
-            p[len(prefix):]: len(c.encode("utf-8"))
+            p[len(prefix):]: len(c.encode("utf-8") if isinstance(c, str) else c)
             for p, c in self.files.items() if p.startswith(prefix) and "/" not in p[len(prefix):]
         }
 

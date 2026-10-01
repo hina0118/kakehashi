@@ -7,7 +7,7 @@ from kakehashi.api.deps import Ctx
 from kakehashi.errors import NotFoundError
 from kakehashi.services.jobs import JobView
 from kakehashi.domain.doujin import DoujinGame
-from kakehashi.services.steam import GridImage, SteamScan, SteamStatus, art_png
+from kakehashi.services.steam import ArtDecision, GridImage, SteamScan, SteamStatus, art_png
 
 router = APIRouter(tags=["steam"])
 
@@ -45,6 +45,11 @@ def apply(ctx: Ctx, body: ApplyRequest) -> JobView:
         "steam.apply", f"Steamに{len(body.ids)}件を登録",
         lambda job: [r.model_dump() for r in ctx.steam.apply(body.ids, job, overwrite_art=body.overwrite_art)],
     )
+
+
+@router.get("/art-status/{game_id}")
+def art_status(ctx: Ctx, game_id: int) -> list[ArtDecision]:
+    return ctx.steam.art_status(game_id)
 
 
 @router.get("/grid/{game_id}")

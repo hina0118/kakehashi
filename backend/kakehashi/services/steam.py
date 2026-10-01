@@ -8,6 +8,7 @@ Steam は起動中これらをメモリに保持し、終了時に書き戻す�
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import posixpath
 from datetime import datetime
@@ -86,6 +87,31 @@ class GridImage(BaseModel):
     """台帳に同じ種類の画像が既にあるか"""
 
 
+ART_STATUS_LABELS = {
+    "new": "新しく書き込む",
+    "updated": "台帳の画像を反映",
+    "forced": "台帳の画像で置き換え",
+    "same": "変更なし",
+    "steam_changed": "Steamで変更済み（残す）",
+    "unmanaged": "Steamで設定済み（残す）",
+    "conflict": "台帳とSteamの両方で変更（Steam側を残す）",
+    "no_source": "台帳に画像なし",
+}
+_WRITE_STATUSES = {"new", "updated", "forced"}
+
+
+class ArtDecision(BaseModel):
+    slot: str
+    """Steamの画像の種類（portrait / header / hero / logo / icon）"""
+    status: str
+    label: str
+    write: bool
+    source_kind: str | None = None
+    """元にする台帳の画像の種類"""
+    source_sig: str | None = None
+    deck_file: str | None = None
+
+
 class ArtPullResult(BaseModel):
     id: int
     title: str
@@ -101,6 +127,8 @@ class SteamGameResult(BaseModel):
     appid: int | None = None
     action: str = ""
     error: str | None = None
+    art: dict[str, str] = {}
+    """Steamの画像の種類 → 判定（ART_STATUS_LABELS のキー）"""
 
 
 class SteamService:
@@ -187,7 +215,7 @@ class SteamService:
             cfg_path = f"{self._root()}/config/config.vdf"
             steam_cfg = text_vdf.loads(fs.read_text(cfg_path)) if fs.exists(cfg_path) else text_vdf.KV()
             grid_dir = posixpath.join(posixpath.dirname(sc_path), "grid")
-            grid_files = set(fs.listdir(grid_dir)) if fs.exists(grid_dir) else set()
+            grid_files = fs.list_attrs(grid_dir)
 
         result = []
         outside: list[str] = []
@@ -248,7 +276,7 @@ class SteamService:
                 return entry_appid(entry)
         return None
 
-    def _grid_images(self, fs, game, appid: int, shortcuts: Shortcuts | None, grid_dir: str, grid_files: set[str]) -> list[GridImage]:
+    def _grid_images(self, fs, game, appid: int, shortcuts: Shortcuts | None, grid_dir: str, grid_files: dict) -> list[GridImage]:
         result = []
         for steam_kind, stem in _GRID_STEMS.items():
             kind = _CATALOG_KIND[steam_kind]
@@ -269,8 +297,7 @@ class SteamService:
         sc_path = self._shortcuts_path(user)
         grid_dir = posixpath.join(posixpath.dirname(sc_path), "grid")
         shortcuts = Shortcuts(fs.read_bytes(sc_path)) if fs.exists(sc_path) else None
-        grid_files = set(fs.listdir(grid_dir)) if fs.exists(grid_dir) else set()
-        return shortcuts, grid_dir, grid_files
+        return shortcuts, grid_dir, fs.list_attrs(grid_dir)
 
     def grid_images(self, game_id: int) -> list[GridImage]:
         """作品に Steam で設定されている画像の一覧（読み取りのみ。Steam起動中でもよい）。"""
@@ -324,6 +351,7 @@ class SteamService:
                             game.id, img.kind, fs.read_bytes(path), posixpath.splitext(img.filename)[1],
                         )
                         r.imported.append(img.kind)
+                        self._record_pulled(game.id, appid, img, grid_files)
                     if job:
                         job.log(f"{game.title}: 取り込み {len(r.imported)}件" + (f"・台帳にあり {len(r.skipped)}件" if r.skipped else ""))
                 except Exception as e:
@@ -381,7 +409,7 @@ class SteamService:
             shortcuts = Shortcuts(fs.read_bytes(sc_path) if fs.exists(sc_path) else None)
             steam_cfg = text_vdf.loads(fs.read_text(cfg_path)) if fs.exists(cfg_path) else text_vdf.KV()
             cfg_before = text_vdf.dumps(steam_cfg)
-            grid_files = set(fs.listdir(grid_dir)) if fs.exists(grid_dir) else set()
+            grid_files = fs.list_attrs(grid_dir)
             job.log(f"Steamアカウント: {user.persona_name or user.account_id}")
 
             done: list[tuple[int, int | None]] = []
@@ -391,7 +419,7 @@ class SteamService:
                 result = SteamGameResult(id=game.id, title=game.title)
                 try:
                     if register:
-                        result.appid, result.action = self._register_one(
+                        result.appid, result.action, result.art = self._register_one(
                             fs, game, shortcuts, steam_cfg, grid_dir, grid_files, config, overwrite_art, claimed,
                         )
                         claimed[result.appid] = game.title
@@ -422,7 +450,7 @@ class SteamService:
         return results
 
     def _register_one(
-        self, fs, game, shortcuts: Shortcuts, steam_cfg, grid_dir: str, grid_files: set[str],
+        self, fs, game, shortcuts: Shortcuts, steam_cfg, grid_dir: str, grid_files: dict,
         config: Config, overwrite_art: bool, claimed: dict[int, str],
     ):
         if not game.deck_dir:
@@ -444,7 +472,8 @@ class SteamService:
             raise ValueError(f"このSteamの登録（appID {appid}）は、台帳の「{owner}」が使っています。")
 
         # 既存のエントリでは、台帳で明示的に指定した項目だけを変え、それ以外はSteam側の設定を残す
-        written = self._write_art(fs, game.id, appid, grid_dir, grid_files, overwrite_art or existing is None)
+        decisions = self._write_art(fs, game, appid, grid_dir, grid_files, overwrite_art, new_entry=existing is None)
+        written = {d.slot for d in decisions if d.write}
         if game.launch_options:
             launch: str | None = game.launch_options
         else:
@@ -461,11 +490,12 @@ class SteamService:
             set_compat_tool(steam_cfg, appid, game.compat_tool)
         elif existing is None or not get_compat_tool(steam_cfg, appid):
             set_compat_tool(steam_cfg, appid, config.steam_deck.default_compat_tool)
+        art = {d.slot: d.status for d in decisions}
         if created:
-            return appid, "登録"
-        return appid, "更新" if game.steam_appid == appid else "既存の登録を引き継いで更新"
+            return appid, "登録", art
+        return appid, "更新" if game.steam_appid == appid else "既存の登録を引き継いで更新", art
 
-    def _remove_one(self, fs, game, shortcuts: Shortcuts, steam_cfg, grid_dir: str, grid_files: set[str]):
+    def _remove_one(self, fs, game, shortcuts: Shortcuts, steam_cfg, grid_dir: str, grid_files: dict):
         appid = game.steam_appid
         if appid is None:
             raise ValueError("Steamに登録されていません。")
@@ -475,35 +505,98 @@ class SteamService:
         for stem in _GRID_STEMS.values():
             for f in _slot_files(grid_files, appid, stem):
                 fs.remove(f"{grid_dir}/{f}")
-                grid_files.discard(f)
+                grid_files.pop(f, None)
+        self._db.delete_art_states(game.id)
         return appid, "解除"
 
     def _write_art(
-        self, fs, game_id: int, appid: int, grid_dir: str, grid_files: set[str], overwrite: bool,
-    ) -> set[str]:
-        """グリッド画像を書き込み、書いた種類を返す。
-
-        台帳から作れない種類には触れない（利用者が自分で付けた画像を消さない）。
-        overwrite=False のときは、Deckに既に画像がある種類も触れない。
-        """
-        written = set()
-        for kind, stem in _GRID_STEMS.items():
-            existing = _slot_files(grid_files, appid, stem)
-            if existing and not overwrite:
+        self, fs, game, appid: int, grid_dir: str, grid_files: dict, overwrite: bool, new_entry: bool,
+    ) -> list[ArtDecision]:
+        """画像ごとに書き込むかを判定して書き込み、判定の一覧を返す。"""
+        decisions = self._plan_art(game, appid, grid_files, overwrite, new_entry)
+        for d in decisions:
+            if not d.write:
                 continue
-            img = self.art(game_id, kind)
-            if img is None:
-                continue
+            stem = _GRID_STEMS[d.slot]
+            img = self.art(game.id, d.slot)
             name = f"{appid}{stem}.png"
             fs.write_bytes(f"{grid_dir}/{name}", art_png(img))
             # 拡張子違いの古い画像が残っていると、Steamがどちらを使うか定まらないので消す
-            for old in existing:
+            for old in _slot_files(grid_files, appid, stem):
                 if old != name:
                     fs.remove(f"{grid_dir}/{old}")
-                    grid_files.discard(old)
-            grid_files.add(name)
-            written.add(kind)
-        return written
+                    grid_files.pop(old, None)
+            attrs = fs.list_attrs(grid_dir).get(name, (0, 0))
+            grid_files[name] = attrs
+            self._db.set_art_state(game.id, d.slot, name, attrs[0], attrs[1], d.source_sig or "")
+        return decisions
+
+    def _plan_art(self, game, appid: int, grid_files: dict, overwrite: bool, new_entry: bool) -> list[ArtDecision]:
+        """Steamの画像の種類ごとに、台帳の画像を書き込むべきかを判定する。
+
+        前回kakehashiが書いた（または取り込んだ）ときの記録と比べ、台帳の画像だけが変わっていれば書き込む。
+        Steam側で画像が変わっている（利用者がSteamで設定し直した）ときは残す。
+        """
+        records = self._db.art_states(game.id)
+        out = []
+        for slot, stem in _GRID_STEMS.items():
+            source_kind, sig = self._art_source(game, slot)
+            files = sorted(_slot_files(grid_files, appid, stem), key=_ext_preference)
+            current = files[0] if files else None
+            rec = records.get(slot)
+            if sig is None:
+                status = "no_source"
+            elif overwrite:
+                status = "forced"
+            elif current is None:
+                status = "new"
+            elif rec is None:
+                status = "new" if new_entry else "unmanaged"
+            else:
+                size, mtime = grid_files[current]
+                deck_same = rec["deck_file"] == current and rec["deck_size"] == size and rec["deck_mtime"] == mtime
+                source_same = rec["source_sig"] == sig
+                if deck_same:
+                    status = "same" if source_same else "updated"
+                else:
+                    status = "steam_changed" if source_same else "conflict"
+            out.append(ArtDecision(
+                slot=slot, status=status, label=ART_STATUS_LABELS[status], write=status in _WRITE_STATUSES,
+                source_kind=source_kind, source_sig=sig, deck_file=current,
+            ))
+        return out
+
+    def _art_source(self, game, slot: str) -> tuple[str | None, str | None]:
+        """Steamの画像の種類 slot の元になる台帳の画像の種類と、その中身の指紋。"""
+        order = steam_art.ART_SPECS[slot][1] if slot in steam_art.ART_SPECS else (slot,)
+        kind = next((k for k in order if k in game.images), None)
+        if kind is None:
+            return None, None
+        digest = hashlib.sha1(self._doujin.image_path(game.id, kind).read_bytes()).hexdigest()
+        return kind, f"{kind}:{digest}"
+
+    def _record_pulled(self, game_id: int, appid: int, img: GridImage, grid_files: dict) -> None:
+        """Deckから取り込んだ画像を、Deckと台帳で同じ状態として記録する（次の反映で書き戻さない）。"""
+        if img.filename not in grid_files:
+            return  # grid の外のアイコンは kakehashi が書く場所と違うので記録しない
+        game = self._doujin.get(game_id)
+        size, mtime = grid_files[img.filename]
+        for slot, stem in _GRID_STEMS.items():
+            if posixpath.splitext(img.filename)[0] != f"{appid}{stem}":
+                continue
+            _kind, sig = self._art_source(game, slot)
+            if sig is not None:
+                self._db.set_art_state(game_id, slot, img.filename, size, mtime, sig)
+
+    def art_status(self, game_id: int) -> list[ArtDecision]:
+        """Steamに反映したときに画像がどう扱われるか（読み取りのみ。Steam起動中でもよい）。"""
+        game = self._doujin.get(game_id)
+        with self._connect() as fs:
+            shortcuts, _grid_dir, grid_files = self._open_grid(fs)
+            appid = self._locate(fs, game, shortcuts)
+        if appid is None:
+            return self._plan_art(game, 0, {}, overwrite=False, new_entry=True)
+        return self._plan_art(game, appid, grid_files, overwrite=False, new_entry=False)
 
 
 _TOO_SHALLOW = {"/", "/home", "/home/deck", "/run", "/run/media", "/run/media/deck"}

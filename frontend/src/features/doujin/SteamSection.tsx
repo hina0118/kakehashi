@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { STEAM_ART_KINDS, api, doujinApi, steamApi, steamArtUrl, type DoujinGame, type SteamArtKind } from '../../api'
+import {
+  STEAM_ART_KINDS, api, doujinApi, steamApi, steamArtUrl, summarizeArt, type DoujinGame, type SteamArtKind,
+} from '../../api'
 import { ErrorBox } from '../../components/ErrorBox'
 import { useRunJob } from '../../lib/jobs'
 import { SteamArtPullDialog } from './SteamArtPullDialog'
@@ -27,6 +29,13 @@ export function SteamSection({ game, compatTool, launchOptions, onCompatTool, on
   const runJob = useRunJob()
   const settings = useQuery({ queryKey: ['settings'], queryFn: api.settings })
   const tools = useQuery({ queryKey: ['steam-compat-tools'], queryFn: steamApi.compatTools, retry: false })
+  // 反映したときに画像がどう扱われるか（Deckにつながらないときは表示しない）
+  const artStatus = useQuery({
+    queryKey: ['steam-art-status', game.id, game.updated_at, JSON.stringify(game.images), game.steam_registered_at],
+    queryFn: () => steamApi.artStatus(game.id),
+    retry: false,
+  })
+  const statusOf = (k: string) => artStatus.data?.find((d) => d.slot === k)
   const [busy, setBusy] = useState<'apply' | 'remove' | null>(null)
   const [error, setError] = useState<unknown>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -49,7 +58,13 @@ export function SteamSection({ game, compatTool, launchOptions, onCompatTool, on
     try {
       const [r] = await runJob(() => (kind === 'apply' ? steamApi.apply([game.id], overwriteArt) : steamApi.remove([game.id])))
       if (r.error) throw new Error(r.error)
-      setMessage(kind === 'apply' ? `Steamに${r.action}しました。DeckでSteamを起動すると反映されます。` : 'Steamから外しました。')
+      const artSummary = kind === 'apply' ? summarizeArt(r.art) : ''
+      setMessage(
+        kind === 'apply'
+          ? `Steamに${r.action}しました${artSummary ? `（画像: ${artSummary}）` : ''}。DeckでSteamを起動すると反映されます。`
+          : 'Steamから外しました。',
+      )
+      artStatus.refetch()
       onDone(await doujinApi.get(game.id))
     } catch (e) {
       setError(e)
@@ -88,18 +103,23 @@ export function SteamSection({ game, compatTool, launchOptions, onCompatTool, on
                 />
               )}
             </div>
-            <figcaption>{ART_LABELS[k]}</figcaption>
+            <figcaption>
+              {ART_LABELS[k]}
+              {statusOf(k) && statusOf(k)!.status !== 'no_source' && (
+                <span className={`art-status ${statusOf(k)!.status}`} title={statusOf(k)!.label}>{shortLabel(statusOf(k)!.status)}</span>
+              )}
+            </figcaption>
           </figure>
         ))}
       </div>
       <p className="hint">
         台帳の画像からSteam用の各サイズを作ります。比率が合わないものは、ぼかした背景に収めます。ロゴとアイコンは台帳に登録したときだけ送ります。
-        Deckに既に画像がある種類は、既定では残します。
+        反映するときは種類ごとに、台帳の画像が前回から変わったものだけを書き込みます。Steamで設定し直した画像は残します。
       </p>
       <div className="transfer-row">
         <label className="check">
           <input type="checkbox" checked={overwriteArt} onChange={(e) => setOverwriteArt(e.target.checked)} />
-          Deckにある既存の画像も置き換える
+          判定に関係なく台帳の画像で置き換える
         </label>
         <button
           className="btn small"
@@ -150,4 +170,18 @@ export function SteamSection({ game, compatTool, launchOptions, onCompatTool, on
       {error != null && <ErrorBox error={error} />}
     </fieldset>
   )
+}
+
+const SHORT_LABELS: Record<string, string> = {
+  new: '新規',
+  updated: '更新あり',
+  forced: '置き換え',
+  same: '変更なし',
+  steam_changed: 'Steamで変更',
+  unmanaged: 'Steamで設定',
+  conflict: '両方で変更',
+}
+
+function shortLabel(status: string): string {
+  return SHORT_LABELS[status] ?? status
 }

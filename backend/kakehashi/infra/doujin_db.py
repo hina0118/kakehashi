@@ -40,6 +40,17 @@ _MIGRATIONS = [
     ALTER TABLE doujin_games ADD COLUMN steam_appid INTEGER;
     ALTER TABLE doujin_games ADD COLUMN steam_registered_at TEXT;
     """,
+    """
+    CREATE TABLE steam_art_state (
+        game_id INTEGER NOT NULL REFERENCES doujin_games(id) ON DELETE CASCADE,
+        slot TEXT NOT NULL,
+        deck_file TEXT NOT NULL,
+        deck_size INTEGER NOT NULL,
+        deck_mtime INTEGER NOT NULL,
+        source_sig TEXT NOT NULL,
+        PRIMARY KEY (game_id, slot)
+    );
+    """,
 ]
 
 _COLUMNS = (
@@ -101,8 +112,27 @@ class DoujinDB:
                 raise NotFoundError(f"同人ゲームが見つかりません（id={game_id}）")
         return self.get(game_id)
 
+    # ---- Steamの画像の同期記録（kakehashiがDeckに書いた / Deckから取り込んだときの状態） ----
+
+    def art_states(self, game_id: int) -> dict[str, dict]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM steam_art_state WHERE game_id = ?", (game_id,)).fetchall()
+        return {r["slot"]: dict(r) for r in rows}
+
+    def set_art_state(self, game_id: int, slot: str, deck_file: str, size: int, mtime: int, source_sig: str) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO steam_art_state VALUES (?, ?, ?, ?, ?, ?)",
+                (game_id, slot, deck_file, size, mtime, source_sig),
+            )
+
+    def delete_art_states(self, game_id: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM steam_art_state WHERE game_id = ?", (game_id,))
+
     def delete(self, game_id: int) -> None:
         with self._lock, self._conn:
+            self._conn.execute("DELETE FROM steam_art_state WHERE game_id = ?", (game_id,))
             cur = self._conn.execute("DELETE FROM doujin_games WHERE id = ?", (game_id,))
         if cur.rowcount == 0:
             raise NotFoundError(f"同人ゲームが見つかりません（id={game_id}）")

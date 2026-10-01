@@ -413,3 +413,83 @@ def test_icon_field_outside_grid_is_used(with_grid, deck_fs):
     assert {i.kind: i.filename for i in with_grid.steam.grid_images(g["id"])} == {"icon": f"{WIN}/アルム_v1_5/icon.ico"}
     [r] = with_grid.steam.pull_art([g["id"]])
     assert r.imported == ["icon"]
+
+
+# ---- Steamに反映するときの画像の更新判定 ----
+
+def statuses(result) -> dict[str, str]:
+    return dict(result.art)
+
+
+def test_art_written_once_then_skipped_until_catalog_changes(steam_ctx, deck_fs, tmp_path):
+    gid = steam_ctx.test_game_id
+    [r] = steam_ctx.steam.apply([gid], Job("t", "t"))
+    assert statuses(r) == {"portrait": "new", "header": "new", "hero": "new", "logo": "no_source", "icon": "no_source"}
+    portrait = f"{GRID}/{r.appid}p.png"
+    first_mtime = deck_fs.mtimes[portrait]
+
+    [r] = steam_ctx.steam.apply([gid], Job("t", "t"))
+    assert statuses(r)["portrait"] == "same"
+    assert deck_fs.mtimes[portrait] == first_mtime  # 書き直していない
+
+    # 台帳のカバーを差し替えると、カバーから作る種類だけ書き込む
+    cover = tmp_path / "new_cover.png"
+    Image.new("RGB", (600, 900), (1, 2, 3)).save(cover)
+    steam_ctx.doujin.import_image_file(gid, "cover", cover)
+    logo = tmp_path / "logo.png"
+    Image.new("RGBA", (300, 100), (9, 9, 9, 255)).save(logo)
+    steam_ctx.doujin.import_image_file(gid, "logo", logo)
+    [r] = steam_ctx.steam.apply([gid], Job("t", "t"))
+    assert statuses(r) == {"portrait": "updated", "header": "updated", "hero": "updated", "logo": "new", "icon": "no_source"}
+    assert deck_fs.mtimes[portrait] > first_mtime
+
+
+def test_steam_side_changes_are_kept(steam_ctx, deck_fs, tmp_path):
+    gid = steam_ctx.test_game_id
+    [r] = steam_ctx.steam.apply([gid], Job("t", "t"))
+    portrait, hero = f"{GRID}/{r.appid}p.png", f"{GRID}/{r.appid}_hero.png"
+    # 利用者がSteamでカバーを設定し直した
+    deck_fs.files[portrait] = b"set in steam"
+    deck_fs.touch(portrait)
+
+    [r] = steam_ctx.steam.apply([gid], Job("t", "t"))
+    assert statuses(r)["portrait"] == "steam_changed"
+    assert deck_fs.files[portrait] == b"set in steam"
+
+    # 台帳側も変えると「両方で変更」。既定ではSteam側を残し、置き換えを選ぶと書き込む
+    cover = tmp_path / "c2.png"
+    Image.new("RGB", (600, 900), (5, 5, 5)).save(cover)
+    steam_ctx.doujin.import_image_file(gid, "cover", cover)
+    deck_fs.touch(hero)
+    [r] = steam_ctx.steam.apply([gid], Job("t", "t"))
+    assert (statuses(r)["portrait"], statuses(r)["hero"], statuses(r)["header"]) == ("conflict", "conflict", "updated")
+    assert deck_fs.files[portrait] == b"set in steam"
+
+    [r] = steam_ctx.steam.apply([gid], Job("t", "t"), overwrite_art=True)
+    assert statuses(r)["portrait"] == "forced"
+    assert deck_fs.files[portrait] != b"set in steam"
+    [r] = steam_ctx.steam.apply([gid], Job("t", "t"))
+    assert statuses(r)["portrait"] == "same"
+
+
+def test_pulled_art_is_not_written_back(with_grid, deck_fs):
+    g = with_grid._doujin_db.create({"title": "t", "deck_dir": f"{WIN}/tratrittle_v1.3.4", "exe": "maid/Game.exe"})
+    with_grid.steam.pull_art([g["id"]])
+    before = dict(deck_fs.mtimes)
+
+    status = {d.slot: d.status for d in with_grid.steam.art_status(g["id"])}
+    # 取り込んだ種類は「変更なし」。ヘッダーはSteamに無いので、台帳のヒーローから作って新しく書き込む
+    assert status == {"portrait": "same", "header": "new", "hero": "same", "logo": "no_source", "icon": "same"}
+
+    [r] = with_grid.steam.apply([g["id"]], Job("t", "t"))
+    assert statuses(r)["portrait"] == "same"
+    assert deck_fs.mtimes.get(f"{GRID}/2422716232p.png") == before.get(f"{GRID}/2422716232p.png")
+    assert deck_fs.files[f"{GRID}/2422716232_icon.ico"]  # Steamで設定したアイコン（.ico）は書き換えない
+
+
+def test_remove_clears_art_records(steam_ctx):
+    gid = steam_ctx.test_game_id
+    steam_ctx.steam.apply([gid], Job("t", "t"))
+    assert steam_ctx._doujin_db.art_states(gid)
+    steam_ctx.steam.remove([gid], Job("t", "t"))
+    assert steam_ctx._doujin_db.art_states(gid) == {}

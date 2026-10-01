@@ -1386,6 +1386,37 @@ textarea {
   display: block;
 }
 
+.art-status {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.art-status.new,
+.art-status.updated,
+.art-status.forced {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.art-status.steam_changed,
+.art-status.unmanaged {
+  background: var(--changed-soft);
+  color: var(--changed);
+}
+
+.art-status.conflict {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 .steam-state {
   padding: 8px 12px;
   border-radius: var(--radius);

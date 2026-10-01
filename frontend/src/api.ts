@@ -303,7 +303,33 @@ export type SteamStatus = {
   problem: string | null
   registered_appids: number[]
 }
-export type SteamGameResult = { id: number; title: string; appid: number | null; action: string; error: string | null }
+export type SteamGameResult = {
+  id: number
+  title: string
+  appid: number | null
+  action: string
+  error: string | null
+  art: Record<string, ArtStatus>
+}
+
+export type ArtStatus = 'new' | 'updated' | 'forced' | 'same' | 'steam_changed' | 'unmanaged' | 'conflict' | 'no_source'
+export type ArtDecision = { slot: string; status: ArtStatus; label: string; write: boolean; source_kind: string | null }
+
+/** 反映結果の画像の判定を「書き込み 3・変更なし 2」のようにまとめる */
+export function summarizeArt(art: Record<string, ArtStatus>): string {
+  const groups: [string, ArtStatus[]][] = [
+    ['書き込み', ['new', 'updated', 'forced']],
+    ['変更なし', ['same']],
+    ['Steam側を残す', ['steam_changed', 'unmanaged']],
+    ['両方で変更（Steam側を残す）', ['conflict']],
+  ]
+  const values = Object.values(art)
+  return groups
+    .map(([label, ss]) => [label, values.filter((v) => ss.includes(v)).length] as const)
+    .filter(([, n]) => n > 0)
+    .map(([label, n]) => `${label} ${n}`)
+    .join('・')
+}
 
 export const STEAM_ART_KINDS = ['portrait', 'header', 'hero', 'logo', 'icon'] as const
 export type SteamArtKind = (typeof STEAM_ART_KINDS)[number]
@@ -334,6 +360,7 @@ export const steamGridImageUrl = (gameId: number, kind: string, filename: string
 
 export const steamApi = {
   gridImages: (id: number) => request<GridImage[]>(`/api/steam/grid/${id}`),
+  artStatus: (id: number) => request<ArtDecision[]>(`/api/steam/art-status/${id}`),
   pullArt: (ids: number[], kinds?: string[], overwrite = false) =>
     post<JobView<ArtPullResult[]>>('/api/steam/pull-art', { ids, kinds: kinds ?? null, overwrite }),
   status: () => request<SteamStatus>('/api/steam/status'),

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { doujinApi, steamApi, type DoujinGame, type SteamGameResult } from '../../api'
+import { doujinApi, steamApi, summarizeArt, type DoujinGame, type SteamGameResult } from '../../api'
 import { ErrorBox } from '../../components/ErrorBox'
 import { Modal } from '../../components/Modal'
 import { useRunJob } from '../../lib/jobs'
@@ -77,7 +77,7 @@ export function SteamBulkDialog({ games, onClose, onDone, onOpenSettings }: Prop
       </p>
       <label className="check">
         <input type="checkbox" checked={overwriteArt} onChange={(e) => setOverwriteArt(e.target.checked)} />
-        Deckにある既存の画像も台帳の画像で置き換える
+        判定に関係なく台帳の画像で置き換える（既定では、台帳で変わった画像だけを書き込み、Steamで設定し直した画像は残す）
       </label>
       {error != null && <ErrorBox error={error} />}
       <div className="coverage-table-wrap">
@@ -93,7 +93,10 @@ export function SteamBulkDialog({ games, onClose, onDone, onOpenSettings }: Prop
                   <td><input type="checkbox" checked={checked.has(g.id)} onChange={() => toggle(g.id)} onClick={(e) => e.stopPropagation()} /></td>
                   <td className="coverage-title">{g.title}</td>
                   <td>{g.steam_registered_at ? '登録済み' : '未登録'}</td>
-                  <td className={r?.error ? 'ng' : ''}>{r ? (r.error ?? r.action) : ''}</td>
+                  <td className={r?.error ? 'ng' : ''}>
+                    {r ? (r.error ?? r.action) : ''}
+                    {r && !r.error && summarizeArt(r.art) && <div className="muted">画像: {summarizeArt(r.art)}</div>}
+                  </td>
                 </tr>
               )
             })}

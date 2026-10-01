@@ -37,6 +37,7 @@ class TransferFS(RemoteFS, Protocol):
     """ファイル転送もできる RemoteFS。"""
     def list_files(self, path: str) -> dict[str, int]: ...
     def list_dirs(self, path: str) -> list[str]: ...
+    def list_attrs(self, path: str) -> dict[str, tuple[int, int]]: ...
     def walk_files(self, path: str) -> Iterator[str]: ...
     def run(self, command: str, timeout: float = 30) -> tuple[int, str, str]: ...
     def upload(
@@ -117,6 +118,17 @@ class DeckClient:
             return {}
         return {
             e.filename: e.st_size or 0
+            for e in entries if not (e.st_mode and _stat.S_ISDIR(e.st_mode))
+        }
+
+    def list_attrs(self, path: str) -> dict[str, tuple[int, int]]:
+        """path直下のファイル名 → (サイズ, 更新日時)。フォルダが無ければ空。"""
+        try:
+            entries = self._sftp.listdir_attr(path)
+        except FileNotFoundError:
+            return {}
+        return {
+            e.filename: (e.st_size or 0, int(e.st_mtime or 0))
             for e in entries if not (e.st_mode and _stat.S_ISDIR(e.st_mode))
         }
 
