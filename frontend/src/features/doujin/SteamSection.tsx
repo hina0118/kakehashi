@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { STEAM_ART_KINDS, api, doujinApi, steamApi, steamArtUrl, type DoujinGame, type SteamArtKind } from '../../api'
 import { ErrorBox } from '../../components/ErrorBox'
 import { useRunJob } from '../../lib/jobs'
+import { SteamArtPullDialog } from './SteamArtPullDialog'
 
 const ART_LABELS: Record<SteamArtKind, string> = {
   portrait: 'カバー',
@@ -30,6 +31,7 @@ export function SteamSection({ game, compatTool, launchOptions, onCompatTool, on
   const [error, setError] = useState<unknown>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [overwriteArt, setOverwriteArt] = useState(false)
+  const [showPull, setShowPull] = useState(false)
   // 作れなかった（元になる画像が無い）種類。URLが変わったら確認し直す
   const [missingArt, setMissingArt] = useState<Record<string, boolean>>({})
 
@@ -94,10 +96,21 @@ export function SteamSection({ game, compatTool, launchOptions, onCompatTool, on
         台帳の画像からSteam用の各サイズを作ります。比率が合わないものは、ぼかした背景に収めます。ロゴとアイコンは台帳に登録したときだけ送ります。
         Deckに既に画像がある種類は、既定では残します。
       </p>
-      <label className="check">
-        <input type="checkbox" checked={overwriteArt} onChange={(e) => setOverwriteArt(e.target.checked)} />
-        Deckにある既存の画像も置き換える
-      </label>
+      <div className="transfer-row">
+        <label className="check">
+          <input type="checkbox" checked={overwriteArt} onChange={(e) => setOverwriteArt(e.target.checked)} />
+          Deckにある既存の画像も置き換える
+        </label>
+        <button
+          className="btn small"
+          disabled={!game.steam_appid && !(game.deck_dir && game.exe)}
+          title="Steam で設定済みの画像（カバー・ヘッダーなど）を台帳に取り込みます"
+          onClick={() => setShowPull(true)}
+        >
+          Steamの画像を台帳に取り込む
+        </button>
+      </div>
+      {showPull && <SteamArtPullDialog game={game} onClose={() => setShowPull(false)} onDone={onDone} />}
 
       <div className="form-row">
         <label className="field grow">

@@ -7,7 +7,7 @@ from kakehashi.api.deps import Ctx
 from kakehashi.errors import NotFoundError
 from kakehashi.services.jobs import JobView
 from kakehashi.domain.doujin import DoujinGame
-from kakehashi.services.steam import SteamScan, SteamStatus, art_png
+from kakehashi.services.steam import GridImage, SteamScan, SteamStatus, art_png
 
 router = APIRouter(tags=["steam"])
 
@@ -44,6 +44,33 @@ def apply(ctx: Ctx, body: ApplyRequest) -> JobView:
     return ctx.jobs.submit(
         "steam.apply", f"Steamに{len(body.ids)}件を登録",
         lambda job: [r.model_dump() for r in ctx.steam.apply(body.ids, job, overwrite_art=body.overwrite_art)],
+    )
+
+
+@router.get("/grid/{game_id}")
+def grid_images(ctx: Ctx, game_id: int) -> list[GridImage]:
+    return ctx.steam.grid_images(game_id)
+
+
+_MEDIA_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".ico": "image/x-icon"}
+
+
+@router.get("/grid/{game_id}/{kind}")
+def grid_image(ctx: Ctx, game_id: int, kind: str) -> Response:
+    data, ext = ctx.steam.grid_image_bytes(game_id, kind)
+    return Response(data, media_type=_MEDIA_TYPES.get(ext, "application/octet-stream"))
+
+
+class PullArtRequest(IdsRequest):
+    kinds: list[str] | None = None
+    overwrite: bool = False
+
+
+@router.post("/pull-art")
+def pull_art(ctx: Ctx, body: PullArtRequest) -> JobView:
+    return ctx.jobs.submit(
+        "steam.pull_art", f"Steamの画像を{len(body.ids)}件取り込み",
+        lambda job: [r.model_dump() for r in ctx.steam.pull_art(body.ids, job, kinds=body.kinds, overwrite=body.overwrite)],
     )
 
 

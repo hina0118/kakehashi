@@ -26,6 +26,7 @@ from kakehashi.infra.steam.config import SteamUser, get_compat_tool, parse_login
 from kakehashi.infra.steam.shortcuts import (
     ShortcutSpec, Shortcuts, entry_appid, normalize_path, quote, shortcut_appid,
 )
+from kakehashi.errors import NotFoundError
 from kakehashi.services.doujin import DoujinService
 from kakehashi.services.jobs import Job
 
@@ -73,6 +74,25 @@ class SteamScan(BaseModel):
     shortcuts: list[SteamShortcut]
     suggested_bases: list[str]
     """格納先に登録されていないが、複数の作品が置かれているフォルダ"""
+
+
+class GridImage(BaseModel):
+    """Deck の Steam に設定されているライブラリ画像（1種類分）。"""
+    kind: str
+    """台帳の画像の種類（cover / header / hero / logo / icon）"""
+    filename: str
+    """grid フォルダ内のファイル名。アイコン欄が grid の外を指すときはそのパス"""
+    in_catalog: bool
+    """台帳に同じ種類の画像が既にあるか"""
+
+
+class ArtPullResult(BaseModel):
+    id: int
+    title: str
+    imported: list[str] = []
+    skipped: list[str] = []
+    """台帳に既にあるため取り込まなかった種類"""
+    error: str | None = None
 
 
 class SteamGameResult(BaseModel):
@@ -215,6 +235,105 @@ class SteamService:
                 })
             result.append(self._doujin.get(row["id"]))
         return result
+
+    # ---- Steamに設定済みの画像を台帳へ取り込む ----
+
+    def _locate(self, fs, game, shortcuts: Shortcuts | None) -> int | None:
+        """台帳の作品に対応する Steam の appID（台帳に無ければ起動ファイルで探す）。"""
+        if game.steam_appid:
+            return game.steam_appid
+        if shortcuts is not None and game.deck_dir and game.exe:
+            entry = shortcuts.find_by_exe(f"{game.deck_dir.rstrip('/')}/{game.exe.lstrip('/')}")
+            if entry is not None:
+                return entry_appid(entry)
+        return None
+
+    def _grid_images(self, fs, game, appid: int, shortcuts: Shortcuts | None, grid_dir: str, grid_files: set[str]) -> list[GridImage]:
+        result = []
+        for steam_kind, stem in _GRID_STEMS.items():
+            kind = _CATALOG_KIND[steam_kind]
+            files = sorted(_slot_files(grid_files, appid, stem), key=_ext_preference)
+            name = files[0] if files else ""
+            if not name and steam_kind == "icon" and shortcuts is not None:
+                # アイコンは shortcuts.vdf の icon 欄で grid の外のファイル（exe と同じ場所の .ico 等）を指すこともある
+                entry = shortcuts.find(appid)
+                icon = normalize_path(str(entry.get("icon") or "")) if entry is not None else ""
+                if icon and posixpath.splitext(icon)[1].lower() in _GRID_EXTS and fs.exists(icon):
+                    name = icon
+            if name:
+                result.append(GridImage(kind=kind, filename=name, in_catalog=kind in game.images))
+        return result
+
+    def _open_grid(self, fs):
+        user = self._resolve_user(self._users(fs))
+        sc_path = self._shortcuts_path(user)
+        grid_dir = posixpath.join(posixpath.dirname(sc_path), "grid")
+        shortcuts = Shortcuts(fs.read_bytes(sc_path)) if fs.exists(sc_path) else None
+        grid_files = set(fs.listdir(grid_dir)) if fs.exists(grid_dir) else set()
+        return shortcuts, grid_dir, grid_files
+
+    def grid_images(self, game_id: int) -> list[GridImage]:
+        """作品に Steam で設定されている画像の一覧（読み取りのみ。Steam起動中でもよい）。"""
+        game = self._doujin.get(game_id)
+        with self._connect() as fs:
+            shortcuts, grid_dir, grid_files = self._open_grid(fs)
+            appid = self._locate(fs, game, shortcuts)
+            if appid is None:
+                raise ValueError("Steamに登録されていない作品です。")
+            return self._grid_images(fs, game, appid, shortcuts, grid_dir, grid_files)
+
+    def grid_image_bytes(self, game_id: int, kind: str) -> tuple[bytes, str]:
+        """Steam に設定されている画像の中身と拡張子。"""
+        game = self._doujin.get(game_id)
+        with self._connect() as fs:
+            shortcuts, grid_dir, grid_files = self._open_grid(fs)
+            appid = self._locate(fs, game, shortcuts)
+            if appid is None:
+                raise ValueError("Steamに登録されていない作品です。")
+            img = next((g for g in self._grid_images(fs, game, appid, shortcuts, grid_dir, grid_files) if g.kind == kind), None)
+            if img is None:
+                raise NotFoundError(f"Steamに {kind} の画像は設定されていません。")
+            path = img.filename if img.filename.startswith("/") else f"{grid_dir}/{img.filename}"
+            return fs.read_bytes(path), posixpath.splitext(img.filename)[1].lower()
+
+    def pull_art(
+        self, ids: list[int], job: Job | None = None, kinds: list[str] | None = None, overwrite: bool = False,
+    ) -> list[ArtPullResult]:
+        """Steam に設定されている画像を台帳に取り込む。
+
+        kinds を省略するとすべての種類が対象。overwrite=False なら台帳に既にある種類は取り込まない。
+        """
+        results = []
+        with self._connect() as fs:
+            shortcuts, grid_dir, grid_files = self._open_grid(fs)
+            for i, game_id in enumerate(ids, 1):
+                game = self._doujin.get(game_id)
+                r = ArtPullResult(id=game.id, title=game.title)
+                try:
+                    appid = self._locate(fs, game, shortcuts)
+                    if appid is None:
+                        raise ValueError("Steamに登録されていない作品です。")
+                    for img in self._grid_images(fs, game, appid, shortcuts, grid_dir, grid_files):
+                        if kinds is not None and img.kind not in kinds:
+                            continue
+                        if img.in_catalog and not overwrite:
+                            r.skipped.append(img.kind)
+                            continue
+                        path = img.filename if img.filename.startswith("/") else f"{grid_dir}/{img.filename}"
+                        self._doujin.import_image_bytes(
+                            game.id, img.kind, fs.read_bytes(path), posixpath.splitext(img.filename)[1],
+                        )
+                        r.imported.append(img.kind)
+                    if job:
+                        job.log(f"{game.title}: 取り込み {len(r.imported)}件" + (f"・台帳にあり {len(r.skipped)}件" if r.skipped else ""))
+                except Exception as e:
+                    r.error = str(e)
+                    if job:
+                        job.log(f"失敗: {game.title}: {e}")
+                results.append(r)
+                if job:
+                    job.progress(i, len(ids))
+        return results
 
     # ---- 画像 ----
 
@@ -422,6 +541,17 @@ def _split_game_path(exe_path: str, bases: list[str]) -> tuple[str, str, bool]:
                 top, rel = rest.split("/", 1)
                 return f"{base}/{top}", rel, True
     return posixpath.dirname(exe_path), posixpath.basename(exe_path), False
+
+
+# Steam のグリッド画像の種類 → 台帳の画像の種類
+_CATALOG_KIND = {"portrait": "cover", "header": "header", "hero": "hero", "logo": "logo", "icon": "icon"}
+
+
+def _ext_preference(filename: str) -> int:
+    """同じ種類の画像が複数の拡張子であるとき、どれを使うか（PNG を優先）。"""
+    order = [".png", ".jpg", ".jpeg", ".webp", ".ico"]
+    ext = posixpath.splitext(filename)[1].lower()
+    return order.index(ext) if ext in order else len(order)
 
 
 def _slot_files(grid_files: set[str], appid: int, stem: str) -> list[str]:

@@ -183,6 +183,7 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
             games.forEach(upsert)
             setNotice(`Steamから${games.length}件を取り込みました（既存の作品への紐づけを含む）。`)
           }}
+          onRefreshed={(games) => games.forEach(upsert)}
         />
       )}
       {dialog === 'steam' && (

@@ -1,17 +1,26 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { ApiError, steamApi, updateSettings, type DoujinGame, type SteamShortcut } from '../../api'
+import { ApiError, doujinApi, steamApi, updateSettings, type DoujinGame, type SteamShortcut } from '../../api'
 import { ErrorBox } from '../../components/ErrorBox'
+import { useRunJob } from '../../lib/jobs'
 import { Modal } from '../../components/Modal'
 
-type Props = { onClose: () => void; onImported: (games: DoujinGame[]) => void; onOpenSettings: () => void }
+type Props = {
+  onClose: () => void
+  onImported: (games: DoujinGame[]) => void
+  /** 取り込み後に画像を読み込み終えた作品（一覧の更新だけに使う） */
+  onRefreshed: (games: DoujinGame[]) => void
+  onOpenSettings: () => void
+}
 
-export function SteamImportDialog({ onClose, onImported, onOpenSettings }: Props) {
+export function SteamImportDialog({ onClose, onImported, onRefreshed, onOpenSettings }: Props) {
   const qc = useQueryClient()
   const titles = new Map((qc.getQueryData<DoujinGame[]>(['doujin']) ?? []).map((g) => [g.id, g.title]))
   const scan = useQuery({ queryKey: ['steam-shortcuts'], queryFn: steamApi.shortcuts, gcTime: 0 })
   const [checked, setChecked] = useState<Set<number> | null>(null)
   const [busy, setBusy] = useState(false)
+  const [withArt, setWithArt] = useState(true)
+  const runJob = useRunJob()
   const [error, setError] = useState<unknown>(null)
 
   const items = scan.data?.shortcuts ?? []
@@ -41,8 +50,17 @@ export function SteamImportDialog({ onClose, onImported, onOpenSettings }: Props
     setBusy(true)
     setError(null)
     try {
-      onImported(await steamApi.importShortcuts([...selected]))
+      const games = await steamApi.importShortcuts([...selected])
+      onImported(games)
       onClose()
+      // 画像の読み込みは時間がかかるので、ジョブとして続ける（進捗は画面右下に出る）
+      const withSteamArt = new Set(items.filter((s) => s.has_art).map((s) => s.appid))
+      const targets = games.filter((g) => g.steam_appid !== null && withSteamArt.has(g.steam_appid)).map((g) => g.id)
+      if (withArt && targets.length > 0) {
+        runJob(() => steamApi.pullArt(targets))
+          .then(async () => onRefreshed(await Promise.all(targets.map((id) => doujinApi.get(id)))))
+          .catch(() => { /* 失敗はジョブの表示に出る */ })
+      }
     } catch (e) {
       setError(e)
       setBusy(false)
@@ -100,6 +118,12 @@ export function SteamImportDialog({ onClose, onImported, onOpenSettings }: Props
         <p className="muted">
           {items.length}件（台帳にあり {items.length - selectable.length}件{outside ? `・格納先の外 ${outside}件` : ''}）
         </p>
+      )}
+      {items.length > 0 && (
+        <label className="check">
+          <input type="checkbox" checked={withArt} onChange={(e) => setWithArt(e.target.checked)} />
+          Steamに設定済みの画像も台帳に取り込む（台帳に無い種類だけ。{items.filter((s) => s.has_art).length}件に画像あり）
+        </label>
       )}
       {items.length > 0 && (
         <div className="coverage-table-wrap">

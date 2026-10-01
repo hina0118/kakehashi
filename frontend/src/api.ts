@@ -326,7 +326,16 @@ export type SteamShortcut = {
 }
 export type SteamScan = { shortcuts: SteamShortcut[]; suggested_bases: string[] }
 
+export type GridImage = { kind: DoujinImageKind; filename: string; in_catalog: boolean }
+export type ArtPullResult = { id: number; title: string; imported: string[]; skipped: string[]; error: string | null }
+
+export const steamGridImageUrl = (gameId: number, kind: string, filename: string) =>
+  `/api/steam/grid/${gameId}/${kind}?v=${encodeURIComponent(filename)}`
+
 export const steamApi = {
+  gridImages: (id: number) => request<GridImage[]>(`/api/steam/grid/${id}`),
+  pullArt: (ids: number[], kinds?: string[], overwrite = false) =>
+    post<JobView<ArtPullResult[]>>('/api/steam/pull-art', { ids, kinds: kinds ?? null, overwrite }),
   status: () => request<SteamStatus>('/api/steam/status'),
   compatTools: () => request<string[]>('/api/steam/compat-tools'),
   shortcuts: () => request<SteamScan>('/api/steam/shortcuts'),

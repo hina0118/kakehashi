@@ -1,6 +1,7 @@
 """同人ゲーム台帳（PCのSQLiteが正本）の管理と、Steam Deckへの転送。"""
 from __future__ import annotations
 
+import io
 import os
 import shutil
 from concurrent.futures import ThreadPoolExecutor
@@ -8,6 +9,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
+from PIL import Image
 from pydantic import BaseModel
 
 from kakehashi.config import Config
@@ -155,6 +157,22 @@ class DoujinService:
         if not source.is_file():
             raise NotFoundError(f"ファイルが見つかりません: {source}")
         return self._store_image(game_id, kind, source.suffix.lower(), lambda dest: shutil.copy2(source, dest))
+
+    def import_image_bytes(self, game_id: int, kind: str, data: bytes, suffix: str) -> DoujinGame:
+        """画像データを登録する。ブラウザで表示できない形式（.ico など）はPNGに変換する。"""
+        try:
+            with Image.open(io.BytesIO(data)) as img:
+                img.load()
+                if suffix.lower() not in IMAGE_SUFFIXES or suffix.lower() == ".tga":
+                    buf = io.BytesIO()
+                    # .ico は複数サイズを含むので、最も大きいものを使う
+                    if getattr(img, "ico", None) is not None:
+                        img = img.ico.getimage(max(img.ico.sizes()))
+                    img.save(buf, "PNG")
+                    data, suffix = buf.getvalue(), ".png"
+        except Exception as e:
+            raise ValueError(f"画像として読み込めませんでした: {e}") from e
+        return self._store_image(game_id, kind, suffix.lower(), lambda dest: dest.write_bytes(data))
 
     def import_image_url(self, game_id: int, kind: str, url: str) -> DoujinGame:
         if not url.startswith(("http://", "https://")):

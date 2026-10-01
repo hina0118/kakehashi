@@ -1504,6 +1504,49 @@ textarea {
   color: #2e7d4f;
 }
 
+.steam-pull-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.steam-pull-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  cursor: pointer;
+}
+
+.steam-pull-item.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.steam-pull-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.steam-pull-frame {
+  height: 150px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.steam-pull-frame img {
+  max-width: 100%;
+  max-height: 100%;
+}
+
 .plain-list {
   margin: 0;
   padding-left: 18px;

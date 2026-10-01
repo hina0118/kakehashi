@@ -345,3 +345,71 @@ def test_appid_used_by_other_catalog_entry_is_rejected(real_like):
     b = real_like._doujin_db.create({"title": "B", "deck_dir": f"{WIN}/tratrittle_v1.3.4", "exe": "maid/Game.exe"})
     ra, rb = real_like.steam.apply([a["id"], b["id"]], Job("t", "t"))
     assert ra.error is None and "「A」" in rb.error
+
+
+# ---- Steamに設定済みの画像を台帳へ取り込む ----
+
+def image_bytes(fmt: str, size=(40, 60), color=(200, 30, 30)) -> bytes:
+    import io
+    buf = io.BytesIO()
+    img = Image.new("RGBA" if fmt == "ICO" else "RGB", size, color)
+    img.save(buf, fmt, **({"sizes": [(16, 16), (48, 48)]} if fmt == "ICO" else {}))
+    return buf.getvalue()
+
+
+@pytest.fixture
+def with_grid(real_like, deck_fs):
+    deck_fs.files.update({
+        f"{GRID}/2422716232p.jpg": image_bytes("JPEG", (600, 900)),
+        f"{GRID}/2422716232p.png": image_bytes("PNG", (600, 900), (0, 0, 200)),  # 同じ種類が2つ（PNGを優先）
+        f"{GRID}/2422716232_hero.jpg": image_bytes("JPEG", (1920, 620)),
+        f"{GRID}/2422716232_icon.ico": image_bytes("ICO", (48, 48)),
+    })
+    return real_like
+
+
+def test_grid_images_lists_steam_art_for_unlinked_game(with_grid):
+    # 台帳にappIDが無くても、起動ファイルで Steam の登録を見つける
+    g = with_grid._doujin_db.create({"title": "t", "deck_dir": f"{WIN}/tratrittle_v1.3.4", "exe": "maid/Game.exe"})
+    images = {i.kind: i.filename for i in with_grid.steam.grid_images(g["id"])}
+    assert images == {"cover": "2422716232p.png", "hero": "2422716232_hero.jpg", "icon": "2422716232_icon.ico"}
+    data, ext = with_grid.steam.grid_image_bytes(g["id"], "hero")
+    assert ext == ".jpg" and data[:2] == b"\xff\xd8"
+
+
+def test_pull_art_fills_missing_kinds_and_converts_ico(with_grid, tmp_path):
+    g = with_grid._doujin_db.create({"title": "t", "deck_dir": f"{WIN}/tratrittle_v1.3.4", "exe": "maid/Game.exe"})
+    mine = tmp_path / "mine.png"
+    Image.new("RGB", (10, 10), (0, 255, 0)).save(mine)
+    with_grid.doujin.import_image_file(g["id"], "hero", mine)  # 台帳に既にある種類
+
+    [r] = with_grid.steam.pull_art([g["id"]])
+    assert (sorted(r.imported), r.skipped, r.error) == (["cover", "icon"], ["hero"], None)
+    game = with_grid.doujin.get(g["id"])
+    assert game.images["icon"].filename == "icon.png"  # .ico は PNG に変換
+    assert game.images["cover"].filename == "cover.png"
+    with Image.open(with_grid.doujin.image_path(g["id"], "icon")) as icon:
+        assert icon.size == (48, 48)  # いちばん大きいサイズを使う
+    with Image.open(with_grid.doujin.image_path(g["id"], "hero")) as hero:
+        assert hero.size == (10, 10)  # 上書きしない
+
+    [r] = with_grid.steam.pull_art([g["id"]], kinds=["hero"], overwrite=True)
+    assert r.imported == ["hero"]
+    assert with_grid.doujin.get(g["id"]).images["hero"].filename == "hero.jpg"
+
+
+def test_pull_art_reports_unregistered(with_grid):
+    g = with_grid._doujin_db.create({"title": "未登録", "deck_dir": f"{WIN}/none", "exe": "Game.exe"})
+    [r] = with_grid.steam.pull_art([g["id"]])
+    assert "登録されていない" in r.error
+
+
+def test_icon_field_outside_grid_is_used(with_grid, deck_fs):
+    sc = Shortcuts(deck_fs.read_bytes(SC_PATH))
+    sc.find(3748535911).set_str("icon", f'"{WIN}/アルム_v1_5/icon.ico"')
+    deck_fs.files[SC_PATH] = sc.dumps()
+    deck_fs.files[f"{WIN}/アルム_v1_5/icon.ico"] = image_bytes("ICO", (48, 48))
+    g = with_grid._doujin_db.create({"title": "a", "deck_dir": f"{WIN}/アルム_v1_5", "exe": "Game.exe"})
+    assert {i.kind: i.filename for i in with_grid.steam.grid_images(g["id"])} == {"icon": f"{WIN}/アルム_v1_5/icon.ico"}
+    [r] = with_grid.steam.pull_art([g["id"]])
+    assert r.imported == ["icon"]
