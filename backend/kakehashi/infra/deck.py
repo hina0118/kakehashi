@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import os
 import posixpath
 import stat as _stat
 from contextlib import contextmanager
@@ -38,6 +39,7 @@ class TransferFS(RemoteFS, Protocol):
     def list_files(self, path: str) -> dict[str, int]: ...
     def list_dirs(self, path: str) -> list[str]: ...
     def list_attrs(self, path: str) -> dict[str, tuple[int, int]]: ...
+    def walk_attrs(self, path: str) -> dict[str, tuple[int, int]]: ...
     def walk_files(self, path: str) -> Iterator[str]: ...
     def run(self, command: str, timeout: float = 30) -> tuple[int, str, str]: ...
     def upload(
@@ -140,6 +142,25 @@ class DeckClient:
             return []
         return sorted(e.filename for e in entries if e.st_mode and _stat.S_ISDIR(e.st_mode))
 
+    def walk_attrs(self, path: str) -> dict[str, tuple[int, int]]:
+        """path配下のファイルを再帰的に列挙し、相対パス（区切りは /）→ (サイズ, 更新日時) を返す。"""
+        out: dict[str, tuple[int, int]] = {}
+
+        def walk(rel: str) -> None:
+            try:
+                entries = self._sftp.listdir_attr(f"{path}/{rel}" if rel else path)
+            except FileNotFoundError:
+                return
+            for e in entries:
+                child = f"{rel}/{e.filename}" if rel else e.filename
+                if e.st_mode and _stat.S_ISDIR(e.st_mode):
+                    walk(child)
+                else:
+                    out[child] = (e.st_size or 0, int(e.st_mtime or 0))
+
+        walk("")
+        return out
+
     def walk_files(self, path: str) -> Iterator[str]:
         """path配下のファイルを再帰的に列挙する（存在しなければ何も返さない）。"""
         try:
@@ -173,6 +194,9 @@ class DeckClient:
                         pass
                 self.makedirs(posixpath.dirname(remote))
                 self._sftp.put(str(local), remote)
+                # 更新日時をPCと揃え、次回以降の比較に使えるようにする
+                mtime = int(local.stat().st_mtime)
+                self._sftp.utime(remote, (mtime, mtime))
                 result.transferred += 1
             except Exception as e:  # 1ファイルの失敗で全体を止めない
                 result.errors.append(f"{local.name}: {e}")
@@ -194,6 +218,9 @@ class DeckClient:
             try:
                 local.parent.mkdir(parents=True, exist_ok=True)
                 self._sftp.get(remote, str(tmp))
+                # 更新日時をDeckと揃え、次回以降の比較に使えるようにする
+                mtime = int(self._sftp.stat(remote).st_mtime or 0)
+                os.utime(tmp, (mtime, mtime))
                 tmp.replace(local)
                 result.transferred += 1
             except Exception as e:

@@ -10,6 +10,7 @@ from kakehashi.api.deps import Ctx
 from kakehashi.domain.doujin import DoujinGame, DoujinPatch
 from kakehashi.domain.works import WorkInfo
 from kakehashi.services.doujin import DeckFolder, FolderCandidate, SearchResult
+from kakehashi.services.doujin_sync import SyncStatus, UpdatePlan
 from kakehashi.services.jobs import JobView
 from kakehashi.services.media import image_thumbnail
 
@@ -113,17 +114,63 @@ def search_works(ctx: Ctx, q: str, stores: str = "") -> SearchResult:
 
 # ---- Steam Deck ----
 
-class TransferRequest(BaseModel):
+class PushRequest(BaseModel):
     base: str | None = None
-    overwrite: bool = False
+    force: bool = False
+    """PCとDeckの両方で変わったファイルもPCの内容で上書きする"""
 
 
-@router.post("/games/{game_id}/transfer")
-def transfer(ctx: Ctx, game_id: int, body: TransferRequest) -> JobView:
+@router.post("/games/{game_id}/push")
+def push(ctx: Ctx, game_id: int, body: PushRequest) -> JobView:
     title = ctx.doujin.get(game_id).title or f"id={game_id}"
     return ctx.jobs.submit(
-        "doujin.transfer", f"{title} をDeckへ転送",
-        lambda job: ctx.doujin.transfer(game_id, job, base=body.base, overwrite=body.overwrite),
+        "doujin.push", f"{title} をDeckへ反映",
+        lambda job: ctx.doujin_sync.push(game_id, job, base=body.base, force=body.force).model_dump(),
+    )
+
+
+class PullRequest(BaseModel):
+    force: bool = False
+    """PCで変更してまだ反映していないファイルもDeckの内容で上書きする"""
+
+
+@router.post("/games/{game_id}/pull")
+def pull(ctx: Ctx, game_id: int, body: PullRequest) -> JobView:
+    title = ctx.doujin.get(game_id).title or f"id={game_id}"
+    return ctx.jobs.submit(
+        "doujin.pull", f"{title} をDeckから取得",
+        lambda job: ctx.doujin_sync.pull(game_id, job, force=body.force).model_dump(),
+    )
+
+
+@router.get("/games/{game_id}/sync-status")
+def sync_status(ctx: Ctx, game_id: int) -> SyncStatus:
+    return ctx.doujin_sync.status(game_id)
+
+
+class UpdateSourceRequest(BaseModel):
+    source: str
+    root: str | None = None
+    """作品フォルダに当たる位置。省略すると自動で選ぶ"""
+
+
+@router.post("/games/{game_id}/update/plan")
+def plan_update(ctx: Ctx, game_id: int, body: UpdateSourceRequest) -> UpdatePlan:
+    return ctx.doujin_sync.plan_update(game_id, body.source, body.root)
+
+
+class ApplyUpdateRequest(BaseModel):
+    source: str
+    root: str
+    version: str = ""
+
+
+@router.post("/games/{game_id}/update/apply")
+def apply_update(ctx: Ctx, game_id: int, body: ApplyUpdateRequest) -> JobView:
+    title = ctx.doujin.get(game_id).title or f"id={game_id}"
+    return ctx.jobs.submit(
+        "doujin.update", f"{title} に更新データを適用",
+        lambda job: ctx.doujin_sync.apply_update(game_id, body.source, body.root, body.version, job).model_dump(),
     )
 
 

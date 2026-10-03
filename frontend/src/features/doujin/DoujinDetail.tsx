@@ -1,23 +1,22 @@
-import { useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import {
   PLAY_STATUSES, PLAY_STATUS_LABELS, STORE_LABELS, api, doujinApi,
   type DoujinGame, type DoujinPatch, type PlayStatus, type WorkHit,
 } from '../../api'
 import { ErrorBox } from '../../components/ErrorBox'
-import { useRunJob } from '../../lib/jobs'
 import { isFetchableStore, storeFromWorkId } from '../../lib/works'
 import { WorkInfoDialog, type WorkApply } from './WorkInfoDialog'
 import { WorkSearchDialog } from './WorkSearchDialog'
 import { DoujinImages } from './DoujinImages'
 import { SteamSection } from './SteamSection'
+import { SyncSection } from './SyncSection'
 import { TagInput } from './TagInput'
 
 type Draft = Required<Omit<DoujinPatch, 'rating'>> & { rating: number | null }
 
 const FIELDS = [
   'title', 'circle', 'work_id', 'store', 'url', 'tags', 'description', 'release_date',
-  'play_status', 'rating', 'notes', 'local_path', 'exe', 'deck_dir', 'launch_options', 'compat_tool',
+  'play_status', 'rating', 'notes', 'local_path', 'exe', 'deck_dir', 'launch_options', 'compat_tool', 'version',
 ] as const
 
 const STORE_OPTIONS = [
@@ -265,11 +264,17 @@ export function DoujinDetail({ game, allTags, onSaved, onDeleted, onOpenSettings
             ))}
           </div>
         )}
-        <TransferSection game={game} draftLocalPath={draft.local_path} onDone={onSaved} onOpenSettings={onOpenSettings} />
-        <label className="field">
-          <span className="field-label">Deck上の作品フォルダ</span>
-          <input value={draft.deck_dir} placeholder="（未転送）" onChange={(e) => set('deck_dir', e.target.value)} />
-        </label>
+        <div className="form-row">
+          <label className="field grow">
+            <span className="field-label">Deck上の作品フォルダ</span>
+            <input value={draft.deck_dir} placeholder="（未転送）" onChange={(e) => set('deck_dir', e.target.value)} />
+          </label>
+          <label className="field">
+            <span className="field-label">バージョン</span>
+            <input value={draft.version} placeholder="例: 1.15" size={10} onChange={(e) => set('version', e.target.value)} />
+          </label>
+        </div>
+        <SyncSection game={game} dirty={!!pendingKeys || saving} onDone={onSaved} onOpenSettings={onOpenSettings} />
       </fieldset>
 
       <SteamSection
@@ -296,76 +301,5 @@ export function DoujinDetail({ game, allTags, onSaved, onDeleted, onOpenSettings
         />
       )}
     </section>
-  )
-}
-
-function TransferSection({ game, draftLocalPath, onDone, onOpenSettings }: {
-  game: DoujinGame
-  draftLocalPath: string
-  onDone: (g: DoujinGame) => void
-  onOpenSettings: () => void
-}) {
-  const runJob = useRunJob()
-  const settings = useQuery({ queryKey: ['settings'], queryFn: api.settings })
-  const bases = settings.data?.steam_deck.doujin_base ?? []
-  const [base, setBase] = useState('')
-  const [overwrite, setOverwrite] = useState(false)
-  const [running, setRunning] = useState(false)
-  const [error, setError] = useState<unknown>(null)
-  const [result, setResult] = useState<string | null>(null)
-  const chosenBase = base || bases[0] || ''
-  const saved = draftLocalPath === game.local_path
-
-  async function transfer() {
-    setRunning(true)
-    setError(null)
-    setResult(null)
-    try {
-      const r = await runJob(() => doujinApi.transfer(game.id, game.deck_dir ? null : chosenBase, overwrite))
-      setResult(`${r.transferred}ファイルを送信しました（送信済み ${r.skipped}件${r.errors.length ? `・失敗 ${r.errors.length}件` : ''}）。`)
-      onDone(await doujinApi.get(game.id))
-    } catch (e) {
-      setError(e)
-    } finally {
-      setRunning(false)
-    }
-  }
-
-  return (
-    <div className="transfer">
-      <div className="transfer-row">
-        {game.deck_dir ? (
-          <span className="muted">送信先: {game.deck_dir}（変わったファイルだけを送ります）</span>
-        ) : bases.length > 0 ? (
-          <label className="field-inline">
-            Deckの格納先
-            <select value={chosenBase} onChange={(e) => setBase(e.target.value)}>
-              {bases.map((b) => <option key={b} value={b}>{b}</option>)}
-            </select>
-          </label>
-        ) : (
-          <span className="muted">
-            Deckの格納先が未設定です。<button className="link" onClick={onOpenSettings}>設定を開く</button>
-          </span>
-        )}
-      </div>
-      <div className="transfer-row">
-        <label className="check">
-          <input type="checkbox" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} />
-          同じサイズのファイルも送り直す
-        </label>
-        <button
-          className="btn"
-          disabled={running || !game.local_path || !saved || (!game.deck_dir && !chosenBase)}
-          title={!game.local_path ? 'PC上の作品フォルダを設定してください' : undefined}
-          onClick={transfer}
-        >
-          {running ? '転送中…' : 'Deckへ転送'}
-        </button>
-        {game.transferred_at && <span className="muted">前回: {new Date(game.transferred_at).toLocaleString('ja-JP')}</span>}
-      </div>
-      {result && <span className="notice">{result}</span>}
-      {error != null && <ErrorBox error={error} />}
-    </div>
   )
 }

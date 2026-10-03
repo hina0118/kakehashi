@@ -21,6 +21,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
   const [systems, setSystems] = useState(initial.systems.join('\n'))
   const [backupMax, setBackupMax] = useState(String(initial.backup_max))
   const [localMedia, setLocalMedia] = useState(initial.windows.media_base)
+  const [pcDoujin, setPcDoujin] = useState(initial.windows.doujin_base ?? '')
   const [romBase, setRomBase] = useState(initial.steam_deck.rom_base)
   const [gamelistBase, setGamelistBase] = useState(initial.steam_deck.gamelist_base)
   const [deckMedia, setDeckMedia] = useState(initial.steam_deck.media_base)
@@ -38,7 +39,7 @@ function SettingsForm({ initial }: { initial: Settings }) {
       api.saveSettings({
         systems: lines(systems),
         backup_max: Number(backupMax) || 0,
-        windows: { ...initial.windows, media_base: localMedia },
+        windows: { ...initial.windows, media_base: localMedia, doujin_base: pcDoujin },
         steam_deck: {
           ...initial.steam_deck,
           rom_base: romBase,
@@ -150,6 +151,23 @@ function SettingsForm({ initial }: { initial: Settings }) {
           <span className="field-label">Deck: 格納先フォルダ（1行に1つ）</span>
           <textarea rows={3} value={doujinBase} onChange={(e) => setDoujinBase(e.target.value)} />
         </label>
+        <label className="field">
+          <span className="field-label">PC: 同人ゲームフォルダ（Deckから取得した作品を置く場所）</span>
+          <span className="input-with-btn">
+            <input value={pcDoujin} placeholder="例: D:\DoujinGames" onChange={(e) => setPcDoujin(e.target.value)} />
+            <button
+              type="button"
+              className="btn small"
+              onClick={async () => {
+                const [p] = await api.pickLocal('folder', 'PC側の同人ゲームフォルダを選択')
+                if (p) { setPcDoujin(p); setDirty(true) }
+              }}
+            >
+              選択
+            </button>
+          </span>
+        </label>
+        <p className="hint">作品は「PC側の同人ゲームフォルダ／Deckのフォルダ名」に置きます。台帳でPC上の作品フォルダを指定済みの作品は、そこを使います。</p>
       </fieldset>
 
       <fieldset>

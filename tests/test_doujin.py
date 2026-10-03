@@ -11,7 +11,6 @@ from kakehashi.domain.doujin import DoujinPatch, guess_from_folder_name, rank_ex
 from kakehashi.errors import NotFoundError
 from kakehashi.infra import dlsite
 from kakehashi.infra.doujin_db import DoujinDB
-from kakehashi.services.jobs import Job
 
 
 @pytest.fixture
@@ -111,24 +110,6 @@ def test_delete_removes_entry_and_images(ctx_doujin, tmp_path):
     with pytest.raises(NotFoundError):
         ctx_doujin.doujin.get(g.id)
     assert (tmp_path / "X" / "Game.exe").exists()  # 本体には触れない
-
-
-def test_transfer_uses_chosen_base_then_sends_only_changes(ctx_doujin, deck_fs, tmp_path):
-    folder = make_game(tmp_path, "My Game")
-    g = ctx_doujin.doujin.register_folder(str(folder))
-
-    with pytest.raises(ValueError):
-        ctx_doujin.doujin.transfer(g.id, Job("t", "t"))  # 格納先の指定が必要
-
-    res = ctx_doujin.doujin.transfer(g.id, Job("t", "t"), base="/deck/sd/doujin")
-    assert res["deck_dir"] == "/deck/sd/doujin/My Game"
-    assert deck_fs.files["/deck/sd/doujin/My Game/www/data.json"] == "{}"
-    g = ctx_doujin.doujin.get(g.id)
-    assert g.deck_dir == "/deck/sd/doujin/My Game" and g.transferred_at is not None
-
-    (folder / "save.dat").write_text("new")
-    res = ctx_doujin.doujin.transfer(g.id, Job("t", "t"), base="/deck/doujin")  # 2回目は前回の場所へ
-    assert (res["deck_dir"], res["transferred"], res["skipped"]) == ("/deck/sd/doujin/My Game", 1, 2)
 
 
 def test_scan_and_import_from_deck(ctx_doujin, deck_fs, tmp_path):

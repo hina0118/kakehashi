@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import posixpath
 from contextlib import contextmanager
 from pathlib import Path
@@ -34,6 +35,13 @@ class MemoryFS:
         """更新日時を進める（Steam側でファイルが変わったことを表すのにも使う）。"""
         self._clock += 1
         self.mtimes[path] = self._clock
+
+    def walk_attrs(self, path: str) -> dict[str, tuple[int, int]]:
+        prefix = path.rstrip("/") + "/"
+        return {
+            p[len(prefix):]: (len(c.encode("utf-8") if isinstance(c, str) else c), self.mtimes.get(p, 0))
+            for p, c in self.files.items() if p.startswith(prefix)
+        }
 
     def list_attrs(self, path: str) -> dict[str, tuple[int, int]]:
         return {
@@ -94,6 +102,7 @@ class MemoryFS:
                 res.skipped += 1
             else:
                 self.files[remote] = data
+                self.mtimes[remote] = int(Path(local).stat().st_mtime)
                 res.transferred += 1
             if on_progress:
                 on_progress(i, len(tasks))
@@ -103,7 +112,13 @@ class MemoryFS:
         res = TransferResult()
         for i, (remote, local) in enumerate(tasks, 1):
             Path(local).parent.mkdir(parents=True, exist_ok=True)
-            Path(local).write_text(self.files[remote], encoding="utf-8")
+            c = self.files[remote]
+            if isinstance(c, bytes):
+                Path(local).write_bytes(c)
+            else:
+                Path(local).write_text(c, encoding="utf-8")
+            m = self.mtimes.get(remote, 0)
+            os.utime(local, (m, m))
             res.transferred += 1
             if on_progress:
                 on_progress(i, len(tasks))

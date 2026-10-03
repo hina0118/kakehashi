@@ -9,6 +9,7 @@ from kakehashi.infra.deck import TransferFS, open_deck
 from kakehashi.infra.doujin_db import DoujinDB
 from kakehashi.infra.media_store import PendingDeletions
 from kakehashi.services.doujin import DoujinService
+from kakehashi.services.doujin_sync import DoujinSyncService, SnapshotStore
 from kakehashi.services.esde import EsdeService
 from kakehashi.services.jobs import JobManager
 from kakehashi.services.media import MediaService
@@ -57,6 +58,12 @@ class AppContext:
         return DoujinService(
             lambda: self._config, self._connector(),
             self._doujin_db, data_dir() / "doujin_images",
+        )
+
+    @cached_property
+    def doujin_sync(self) -> DoujinSyncService:
+        return DoujinSyncService(
+            lambda: self._config, self._connector(), self._doujin_db, SnapshotStore(data_dir() / "doujin_sync"),
         )
 
     @cached_property

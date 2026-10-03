@@ -51,12 +51,15 @@ _MIGRATIONS = [
         PRIMARY KEY (game_id, slot)
     );
     """,
+    """
+    ALTER TABLE doujin_games ADD COLUMN version TEXT NOT NULL DEFAULT '';
+    """,
 ]
 
 _COLUMNS = (
     "title", "circle", "work_id", "store", "url", "tags", "description", "release_date",
     "play_status", "rating", "notes", "local_path", "exe", "deck_dir", "transferred_at",
-    "launch_options", "compat_tool", "steam_appid", "steam_registered_at",
+    "launch_options", "compat_tool", "steam_appid", "steam_registered_at", "version",
 )
 
 

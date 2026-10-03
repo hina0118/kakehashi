@@ -5,7 +5,6 @@ import io
 import os
 import shutil
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
@@ -23,7 +22,6 @@ from kakehashi.domain.works import WorkHit, WorkInfo
 from kakehashi.infra import dlsite, dmm, downloader
 from kakehashi.infra.deck import DeckConnector
 from kakehashi.infra.doujin_db import DoujinDB
-from kakehashi.services.jobs import Job
 
 
 class FolderCandidate(BaseModel):
@@ -239,33 +237,6 @@ class DoujinService:
         return result
 
     # ---- Steam Deck ----
-
-    def transfer(self, game_id: int, job: Job, base: str | None = None, overwrite: bool = False) -> dict:
-        """PCの作品フォルダをDeckへ送る。2回目以降は前回と同じフォルダへ差分だけを送る。"""
-        game = self._db.get(game_id)
-        local = Path(game["local_path"]) if game["local_path"] else None
-        if local is None or not local.is_dir():
-            raise ValueError("PC上の作品フォルダが設定されていないか、見つかりません。")
-        remote_dir = game["deck_dir"]
-        if not remote_dir:
-            bases = self._get_config().steam_deck.doujin_base
-            if not bases:
-                raise ValueError("設定画面で、Deckの同人ゲーム格納先を登録してください。")
-            if base not in bases:
-                raise ValueError(f"格納先を選んでください（候補: {', '.join(bases)}）。")
-            remote_dir = f"{base.rstrip('/')}/{local.name}"
-
-        tasks = [(local / rel, f"{remote_dir}/{rel}") for rel in _local_files(local)]
-        job.log(f"送信先: {remote_dir}/（{len(tasks)}ファイル）")
-        with self._connect() as fs:
-            res = fs.upload(tasks, overwrite=overwrite, on_progress=job.progress)
-        for e in res.errors:
-            job.log(f"失敗: {e}")
-        if not res.errors:
-            self._db.update(game_id, {"deck_dir": remote_dir, "transferred_at": datetime.now()})
-        elif not game["deck_dir"]:
-            self._db.update(game_id, {"deck_dir": remote_dir})
-        return {"deck_dir": remote_dir, "transferred": res.transferred, "skipped": res.skipped, "errors": res.errors}
 
     def scan_deck(self) -> list[DeckFolder]:
         """Deckの格納先にある作品フォルダを列挙し、台帳と紐づいているかを添えて返す。"""

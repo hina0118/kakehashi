@@ -14,7 +14,7 @@ export type UpdateResult = { applied: number; deleted: number; requested: number
 export type Settings = {
   systems: string[]
   backup_max: number
-  windows: { media_base: string }
+  windows: { media_base: string; doujin_base: string }
   steam_deck: {
     rom_base: string
     gamelist_base: string
@@ -198,6 +198,7 @@ export type DoujinGame = {
   exe: string
   deck_dir: string
   transferred_at: string | null
+  version: string
   launch_options: string
   compat_tool: string
   steam_appid: number | null
@@ -255,6 +256,41 @@ export type WorkHit = {
 }
 export type WorkSearchResult = { hits: WorkHit[]; errors: Record<string, string> }
 
+export type PullResult = {
+  local_dir: string
+  downloaded: number
+  unchanged: number
+  kept_local: string[]
+  local_only: number
+  errors: string[]
+}
+export type PushResult = {
+  deck_dir: string
+  pushed: number
+  unchanged: number
+  kept_remote: string[]
+  conflicts: string[]
+  errors: string[]
+}
+export type SyncStatus = {
+  synced_before: boolean
+  local_dir: string
+  local_changed: string[]
+  remote_changed: string[]
+  conflicts: string[]
+}
+export type UpdatePlan = {
+  source: string
+  root: string
+  root_candidates: string[]
+  exe_found: boolean
+  version: string
+  new: number
+  changed: number
+  same: number
+  files: { path: string; status: 'new' | 'changed'; size: number }[]
+}
+
 const dj = (id: number) => `/api/doujin/games/${id}`
 
 export function doujinImageUrl(g: DoujinGame, kind: DoujinImageKind, width?: number): string | null {
@@ -285,10 +321,13 @@ export const doujinApi = {
     request<WorkInfo>(`/api/doujin/works/${encodeURIComponent(store)}/${encodeURIComponent(workId)}`),
   searchWorks: (q: string, stores: string[]) =>
     request<WorkSearchResult>(`/api/doujin/works/search?${new URLSearchParams({ q, stores: stores.join(',') })}`),
-  transfer: (id: number, base: string | null, overwrite = false) =>
-    post<JobView<{ deck_dir: string; transferred: number; skipped: number; errors: string[] }>>(
-      `${dj(id)}/transfer`, { base, overwrite },
-    ),
+  pull: (id: number, force = false) => post<JobView<PullResult>>(`${dj(id)}/pull`, { force }),
+  push: (id: number, base: string | null, force = false) => post<JobView<PushResult>>(`${dj(id)}/push`, { base, force }),
+  syncStatus: (id: number) => request<SyncStatus>(`${dj(id)}/sync-status`),
+  planUpdate: (id: number, source: string, root?: string) =>
+    post<UpdatePlan>(`${dj(id)}/update/plan`, { source, root: root ?? null }),
+  applyUpdate: (id: number, source: string, root: string, version: string) =>
+    post<JobView<{ copied: number; version: string; exe_exists: boolean }>>(`${dj(id)}/update/apply`, { source, root, version }),
   scanDeck: () => post<DeckFolder[]>('/api/doujin/deck/scan'),
   importFromDeck: (paths: string[]) => post<DoujinGame[]>('/api/doujin/deck/import', { paths }),
 }

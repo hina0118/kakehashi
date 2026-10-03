@@ -35,6 +35,8 @@ class _Section(BaseModel):
 class LocalPaths(_Section):
     """Windows PC側のパス。"""
     media_base: str = ""
+    doujin_base: str = ""
+    """PC側の同人ゲームフォルダ。Deckから取得した作品は {doujin_base}/{Deckのフォルダ名} に置く。"""
 
 
 class DeckPaths(_Section):

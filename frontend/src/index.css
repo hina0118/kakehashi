@@ -1578,6 +1578,29 @@ textarea {
   max-height: 100%;
 }
 
+.sync-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.file-list summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.file-list summary.danger {
+  color: var(--danger);
+}
+
+.file-list ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  max-height: 180px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+
 .plain-list {
   margin: 0;
   padding-left: 18px;

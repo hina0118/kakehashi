@@ -32,7 +32,9 @@ PC で Web サーバを起動し、ブラウザで操作します。Deck へは 
 - 販売サイト（DLsite / FANZA同人 / FANZA GAMES / DMM GAMES）をタイトルで検索して作品を選び、タイトル・サークル（ブランド）・発売日・ジャンル・カバー画像を取得
   - 作品IDの形式: DLsite `RJ01234567`、FANZA同人 `d_123456`、FANZA GAMES・DMM GAMES `aman_0937` など
   - DMM の各サイトは作品ページから読み取るため、ページの構成が変わると取得できなくなることがあります
-- Deck への転送（2回目以降は変わったファイルだけ）
+- Deck を正とした作品フォルダの同期: 「Deckから取得」→「更新データを適用」（展開済みのフォルダを重ねる）→「Deckへ反映」
+  - 反映では PC で変わったファイルだけを送り、Deck で変わったファイル（セーブなど）は上書きしない。どちらでもファイルは削除しない
+  - 更新データは起動ファイルの位置で作品フォルダと合わせる（`作品名_v1.4/…` のように1段深くてもよい）。バージョンはフォルダ名から推定する
 - Steam に登録済みの非Steamゲームの取り込み（appID・Proton・起動オプションを引き継ぐ）
 - Steam に設定済みのライブラリ画像（カバー・ヘッダー・ヒーロー・ロゴ・アイコン）を台帳の画像として取り込む
 - **Steam への登録**: Deck の Steam に非Steamゲームとして登録し、ライブラリ画像（カバー・ヘッダー・ヒーロー・ロゴ・アイコン）と Proton の設定も書き込む
@@ -102,6 +104,8 @@ ip addr show | grep "inet "   # 例: inet 192.168.1.42/24 → 192.168.1.42 がIP
 | `config.json` | 接続先・フォルダなどの設定 |
 | `work/doujin.db` | 同人ゲーム台帳 |
 | `work/doujin_images/` | 同人ゲームの画像 |
+| `work/doujin_sync/` | 作品ごとの「前回 Deck と同期したときの状態」 |
+| `windows.doujin_base`（設定） | Deck から取得した同人ゲームの作品フォルダ |
 | `work/pending_media_deletions.json` | PC で削除し、まだ Deck から消していないメディア |
 | `windows.media_base`（設定） | ES-DE のメディア（`downloaded_media`） |
 
