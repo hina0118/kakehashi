@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { api, doujinApi, type DoujinGame, type PullResult, type PushResult, type SyncStatus } from '../../api'
 import { ErrorBox } from '../../components/ErrorBox'
 import { useRunJob } from '../../lib/jobs'
+import { DeckTextDialog } from './DeckTextDialog'
 import { UpdateDialog } from './UpdateDialog'
 
 type Props = {
@@ -25,6 +26,7 @@ export function SyncSection({ game, dirty, onDone, onOpenSettings }: Props) {
   const [pushed, setPushed] = useState<PushResult | null>(null)
   const [status, setStatus] = useState<SyncStatus | null>(null)
   const [showUpdate, setShowUpdate] = useState(false)
+  const [showTexts, setShowTexts] = useState(false)
   const chosenBase = base || bases[0] || ''
   const hasLocal = !!game.local_path || (!!pcBase && !!game.deck_dir)
 
@@ -87,6 +89,9 @@ export function SyncSection({ game, dirty, onDone, onOpenSettings }: Props) {
         <button className="btn small" disabled={busy !== null || !hasLocal} onClick={checkStatus}>
           {busy === 'status' ? '確認中…' : '差分を確認'}
         </button>
+        <button className="btn small" disabled={!game.deck_dir} onClick={() => setShowTexts(true)}>
+          テキストを読む
+        </button>
       </div>
       <p className="hint">
         Deck上のファイルを正とします。「Deckから取得」→「更新データを適用」→「Deckへ反映」の順に使います。
@@ -137,6 +142,7 @@ export function SyncSection({ game, dirty, onDone, onOpenSettings }: Props) {
       )}
       {error != null && <ErrorBox error={error} />}
 
+      {showTexts && <DeckTextDialog game={game} onClose={() => setShowTexts(false)} />}
       {showUpdate && (
         <UpdateDialog
           game={game}

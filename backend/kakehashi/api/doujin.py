@@ -10,7 +10,7 @@ from kakehashi.api.deps import Ctx
 from kakehashi.domain.doujin import DoujinGame, DoujinPatch
 from kakehashi.domain.works import WorkInfo
 from kakehashi.services.doujin import DeckFolder, FolderCandidate, SearchResult
-from kakehashi.services.doujin_sync import SyncStatus, UpdatePlan
+from kakehashi.services.doujin_sync import SyncStatus, TextContent, TextFile, UpdatePlan
 from kakehashi.services.jobs import JobView
 from kakehashi.services.media import image_thumbnail
 
@@ -172,6 +172,16 @@ def apply_update(ctx: Ctx, game_id: int, body: ApplyUpdateRequest) -> JobView:
         "doujin.update", f"{title} に更新データを適用",
         lambda job: ctx.doujin_sync.apply_update(game_id, body.source, body.root, body.version, job).model_dump(),
     )
+
+
+@router.get("/games/{game_id}/deck-texts")
+def deck_texts(ctx: Ctx, game_id: int) -> list[TextFile]:
+    return ctx.doujin_sync.deck_texts(game_id)
+
+
+@router.get("/games/{game_id}/deck-text")
+def read_deck_text(ctx: Ctx, game_id: int, path: str) -> TextContent:
+    return ctx.doujin_sync.read_deck_text(game_id, path)
 
 
 @router.post("/deck/scan")

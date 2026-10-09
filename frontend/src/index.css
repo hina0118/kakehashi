@@ -1607,11 +1607,89 @@ textarea {
   width: 100%;
 }
 
+.text-viewer {
+  display: grid;
+  grid-template-columns: minmax(160px, 240px) 1fr;
+  gap: 12px;
+  height: min(65vh, 640px);
+}
+
+.text-files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+}
+
+.text-files button {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  word-break: break-all;
+  cursor: pointer;
+}
+
+.text-files button:hover {
+  background: var(--surface-2);
+}
+
+.text-files button.active {
+  background: var(--accent-soft);
+}
+
+.text-files .muted {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.text-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.text-body p {
+  margin: 0 0 6px;
+  font-size: 12px;
+}
+
+.text-body pre {
+  flex: 1;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ---- 狭い画面 ---- */
 
 @media (max-width: 720px) {
   .esde-body {
     flex-direction: column;
+  }
+
+  .text-viewer {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .text-files {
+    max-height: 140px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
   }
 
   .gen-layout,

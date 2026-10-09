@@ -159,3 +159,28 @@ def test_plan_update_root_can_be_chosen(sync_ctx, deck_fs, on_deck, tmp_path):
     assert [f.path for f in plan.files] == ["extras/new_folder/x.txt"]
     with pytest.raises(ValueError):
         sync_ctx.doujin_sync.plan_update(on_deck, str(upd), root="nope")
+
+
+def test_deck_texts_lists_and_decodes_readme(sync_ctx, deck_fs, on_deck):
+    deck_fs.files.update({
+        f"{DECK}/readme.txt": "はじめに\r\n遊び方".encode("cp932"),
+        f"{DECK}/maid/www/更新履歴.md": "## v1.1",
+    })
+    files = sync_ctx.doujin_sync.deck_texts(on_deck)
+    assert [f.path for f in files] == ["readme.txt", "maid/www/更新履歴.md"]
+
+    t = sync_ctx.doujin_sync.read_deck_text(on_deck, "readme.txt")
+    assert (t.text, t.encoding, t.truncated) == ("はじめに\r\n遊び方", "Shift_JIS", False)
+    assert sync_ctx.doujin_sync.read_deck_text(on_deck, "maid/www/更新履歴.md").encoding == "UTF-8"
+
+
+@pytest.mark.parametrize("rel", ["../other/readme.txt", "/etc/passwd.txt", "maid/Game.exe"])
+def test_read_deck_text_rejects_paths_outside_texts(sync_ctx, on_deck, rel):
+    with pytest.raises(ValueError):
+        sync_ctx.doujin_sync.read_deck_text(on_deck, rel)
+
+
+def test_decode_text_tolerates_cut_multibyte_char_when_truncated():
+    from kakehashi.services.doujin_sync import decode_text
+    data = "日本語".encode("utf-8")[:-1]
+    assert decode_text(data, truncated=True) == ("日本", "UTF-8")

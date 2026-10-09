@@ -272,6 +272,9 @@ export type PushResult = {
   conflicts: string[]
   errors: string[]
 }
+export type DeckTextFile = { path: string; size: number; mtime: number }
+export type DeckText = { path: string; text: string; encoding: string; truncated: boolean }
+
 export type SyncStatus = {
   synced_before: boolean
   local_dir: string
@@ -324,6 +327,9 @@ export const doujinApi = {
   pull: (id: number, force = false) => post<JobView<PullResult>>(`${dj(id)}/pull`, { force }),
   push: (id: number, base: string | null, force = false) => post<JobView<PushResult>>(`${dj(id)}/push`, { base, force }),
   syncStatus: (id: number) => request<SyncStatus>(`${dj(id)}/sync-status`),
+  deckTexts: (id: number) => request<DeckTextFile[]>(`${dj(id)}/deck-texts`),
+  deckText: (id: number, path: string) =>
+    request<DeckText>(`${dj(id)}/deck-text?${new URLSearchParams({ path })}`),
   planUpdate: (id: number, source: string, root?: string) =>
     post<UpdatePlan>(`${dj(id)}/update/plan`, { source, root: root ?? null }),
   applyUpdate: (id: number, source: string, root: string, version: string) =>

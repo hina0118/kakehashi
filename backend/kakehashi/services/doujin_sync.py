@@ -98,6 +98,25 @@ class PushResult(BaseModel):
     errors: list[str] = []
 
 
+TEXT_SUFFIXES = (".txt", ".text", ".md", ".nfo", ".ini", ".log")
+_TEXT_LIMIT = 512 * 1024
+
+
+class TextFile(BaseModel):
+    path: str
+    """作品フォルダからの相対パス"""
+    size: int
+    mtime: int
+
+
+class TextContent(BaseModel):
+    path: str
+    text: str
+    encoding: str
+    truncated: bool
+    """大きいため先頭だけを返した"""
+
+
 class SnapshotStore:
     """作品ごとの「前回同期したときのDeck上のファイルの状態」。"""
 
@@ -146,6 +165,42 @@ class DoujinSyncService:
         if not game["deck_dir"]:
             raise ValueError("PC側の作品フォルダが設定されていません。")
         return Path(base) / PurePosixPath(game["deck_dir"]).name
+
+    # ---- Deck上のテキストファイル（readmeなど）を読む ----
+
+    def _deck_dir(self, game_id: int) -> str:
+        deck_dir = self._db.get(game_id)["deck_dir"]
+        if not deck_dir:
+            raise ValueError("Deck上の作品フォルダが設定されていません。")
+        return deck_dir.rstrip("/")
+
+    def deck_texts(self, game_id: int) -> list[TextFile]:
+        """Deck上の作品フォルダにあるテキストファイルの一覧。浅い階層・名前順。"""
+        deck_dir = self._deck_dir(game_id)
+        with self._connect() as fs:
+            remote = fs.walk_attrs(deck_dir)
+        if not remote:
+            raise NotFoundError(f"Deck上に作品フォルダが見つからないか、空です: {deck_dir}")
+        files = [
+            TextFile(path=rel, size=size, mtime=mtime)
+            for rel, (size, mtime) in remote.items() if rel.lower().endswith(TEXT_SUFFIXES)
+        ]
+        return sorted(files, key=lambda f: (f.path.count("/"), f.path.lower()))[:_LIST_LIMIT]
+
+    def read_deck_text(self, game_id: int, rel: str) -> TextContent:
+        """Deck上の作品フォルダにあるテキストファイルを読む。文字コードは自動で判定する。"""
+        parts = PurePosixPath(rel).parts
+        if not parts or rel.startswith("/") or ".." in parts or not rel.lower().endswith(TEXT_SUFFIXES):
+            raise ValueError(f"読めないファイルです: {rel}")
+        deck_dir = self._deck_dir(game_id)
+        with self._connect() as fs:
+            try:
+                data = fs.read_bytes(f"{deck_dir}/{rel}")
+            except FileNotFoundError:
+                raise NotFoundError(f"Deck上にファイルが見つかりません: {rel}") from None
+        truncated = len(data) > _TEXT_LIMIT
+        text, encoding = decode_text(data[:_TEXT_LIMIT], truncated)
+        return TextContent(path=rel, text=text, encoding=encoding, truncated=truncated)
 
     # ---- Deckから取得 ----
 
@@ -447,3 +502,17 @@ def _is_inside(path: Path, parent: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def decode_text(data: bytes, truncated: bool = False) -> tuple[str, str]:
+    """同人ゲームのテキストに多い文字コード（UTF-8 / Shift_JIS / UTF-16）を判定して読む。"""
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return data.decode("utf-16", errors="replace"), "UTF-16"
+    for enc, label in (("utf-8-sig", "UTF-8"), ("cp932", "Shift_JIS")):
+        # 先頭だけを読んだときは、末尾の文字が途中で切れていることがある
+        for cut in range(4 if truncated else 1):
+            try:
+                return data[:len(data) - cut].decode(enc), label
+            except UnicodeDecodeError:
+                continue
+    return data.decode("cp932", errors="replace"), "Shift_JIS"
