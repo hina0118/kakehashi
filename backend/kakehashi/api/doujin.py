@@ -10,7 +10,7 @@ from kakehashi.api.deps import Ctx
 from kakehashi.domain.doujin import DoujinGame, DoujinPatch
 from kakehashi.domain.works import WorkInfo
 from kakehashi.services.doujin import DeckFolder, FolderCandidate, SearchResult
-from kakehashi.services.doujin_sync import SyncStatus, TextContent, TextFile, UpdatePlan
+from kakehashi.services.doujin_sync import DeckCheck, SyncStatus, TextContent, TextFile, UpdatePlan
 from kakehashi.services.jobs import JobView
 from kakehashi.services.media import image_thumbnail
 
@@ -182,6 +182,20 @@ def deck_texts(ctx: Ctx, game_id: int) -> list[TextFile]:
 @router.get("/games/{game_id}/deck-text")
 def read_deck_text(ctx: Ctx, game_id: int, path: str) -> TextContent:
     return ctx.doujin_sync.read_deck_text(game_id, path)
+
+
+class IdsRequest(BaseModel):
+    ids: list[int]
+
+
+@router.post("/deck/check")
+def check_deck(ctx: Ctx) -> DeckCheck:
+    return ctx.doujin_sync.check_deck()
+
+
+@router.post("/deck/unlink")
+def unlink_deck(ctx: Ctx, body: IdsRequest) -> dict:
+    return {"unlinked": ctx.doujin_sync.unlink_deck(body.ids)}
 
 
 @router.post("/deck/scan")

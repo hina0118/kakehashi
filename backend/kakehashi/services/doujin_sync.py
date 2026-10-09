@@ -12,6 +12,7 @@ from __future__ import annotations
 import filecmp
 import json
 import os
+import posixpath
 import re
 import shutil
 import threading
@@ -117,6 +118,23 @@ class TextContent(BaseModel):
     """大きいため先頭だけを返した"""
 
 
+class DeckCheckItem(BaseModel):
+    id: int
+    title: str
+    deck_dir: str
+    status: str
+    """folder_missing（作品フォルダが無い）/ exe_missing（起動ファイルが無い）/
+    unreachable（格納先のフォルダごと見つからない。SDカードが抜けているなど）"""
+    exe: str
+    steam_registered: bool
+
+
+class DeckCheck(BaseModel):
+    checked: int
+    """調べた作品（Deckのフォルダが設定されているもの）の数"""
+    problems: list[DeckCheckItem]
+
+
 class SnapshotStore:
     """作品ごとの「前回同期したときのDeck上のファイルの状態」。"""
 
@@ -165,6 +183,54 @@ class DoujinSyncService:
         if not game["deck_dir"]:
             raise ValueError("PC側の作品フォルダが設定されていません。")
         return Path(base) / PurePosixPath(game["deck_dir"]).name
+
+    # ---- Deck上で削除された作品を見つける ----
+
+    def check_deck(self) -> DeckCheck:
+        """台帳でDeckにあることになっている作品のうち、Deck上でフォルダや起動ファイルが無くなったものを探す。"""
+        rows = [r for r in self._db.list() if r["deck_dir"]]
+        problems: list[DeckCheckItem] = []
+        with self._connect() as fs:
+            parents: dict[str, set[str] | None] = {}  # 親フォルダ → 中のフォルダ名（親ごと無ければ None）
+            for r in rows:
+                deck_dir = r["deck_dir"].rstrip("/")
+                parent, name = posixpath.split(deck_dir)
+                if parent not in parents:
+                    parents[parent] = set(fs.list_dirs(parent)) if fs.exists(parent) else None
+                children = parents[parent]
+                if children is None:
+                    status = "unreachable"
+                elif name not in children:
+                    status = "folder_missing"
+                elif r["exe"] and not fs.exists(f"{deck_dir}/{r['exe']}"):
+                    status = "exe_missing"
+                else:
+                    continue
+                problems.append(DeckCheckItem(
+                    id=r["id"], title=r["title"], deck_dir=deck_dir, status=status, exe=r["exe"],
+                    steam_registered=r["steam_registered_at"] is not None,
+                ))
+        return DeckCheck(checked=len(rows), problems=problems)
+
+    def unlink_deck(self, ids: list[int]) -> list[int]:
+        """Deck上で削除された作品から、台帳のDeckのフォルダと同期の記録を外す。PCのファイルと台帳の作品は残す。
+
+        フォルダがまだDeckにある作品は外さない。外した作品のidを返す。
+        """
+        done = []
+        with self._connect() as fs:
+            for game_id in ids:
+                deck_dir = self._db.get(game_id)["deck_dir"]
+                if not deck_dir:
+                    continue
+                if fs.exists(deck_dir):
+                    raise ValueError(f"作品フォルダがまだDeckにあります: {deck_dir}")
+                if not fs.exists(posixpath.dirname(deck_dir.rstrip("/"))):
+                    raise ValueError(f"格納先のフォルダごと見つかりません（SDカードが抜けていませんか）: {deck_dir}")
+                self._db.update(game_id, {"deck_dir": ""})
+                self._snapshots.delete(game_id)
+                done.append(game_id)
+        return done
 
     # ---- Deck上のテキストファイル（readmeなど）を読む ----
 

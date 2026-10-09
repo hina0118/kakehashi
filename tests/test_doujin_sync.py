@@ -1,5 +1,6 @@
 """同人ゲームの作品フォルダを、Deckを正としてPCと同期し、更新データを適用する。"""
 import os
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -184,3 +185,38 @@ def test_decode_text_tolerates_cut_multibyte_char_when_truncated():
     from kakehashi.services.doujin_sync import decode_text
     data = "日本語".encode("utf-8")[:-1]
     assert decode_text(data, truncated=True) == ("日本", "UTF-8")
+
+
+def test_check_deck_finds_deleted_folders_and_missing_exe(sync_ctx, deck_fs, on_deck):
+    db = sync_ctx._doujin_db
+    deck_fs.files["/deck/games/Other/Game.exe"] = "exe"
+    renamed = db.create({"title": "Renamed", "deck_dir": "/deck/games/Other", "exe": "Old.exe"})["id"]
+    deleted = db.create({"title": "Deleted", "deck_dir": "/deck/games/Gone", "exe": "Game.exe"})["id"]
+    db.update(deleted, {"steam_appid": 123, "steam_registered_at": datetime.now()})
+    no_sd = db.create({"title": "SD", "deck_dir": "/run/media/sd/Games/X", "exe": "Game.exe"})["id"]
+
+    r = sync_ctx.doujin_sync.check_deck()
+    assert r.checked == 4
+    assert {(p.id, p.status, p.steam_registered) for p in r.problems} == {
+        (renamed, "exe_missing", False), (deleted, "folder_missing", True), (no_sd, "unreachable", False),
+    }
+
+
+def test_unlink_deck_clears_deck_dir_and_snapshot_only_for_deleted_folders(sync_ctx, deck_fs, on_deck):
+    sync_ctx.doujin_sync.pull(on_deck, job())
+    with pytest.raises(ValueError, match="まだDeckにあります"):
+        sync_ctx.doujin_sync.unlink_deck([on_deck])
+
+    for p in [p for p in deck_fs.files if p.startswith(DECK)]:
+        del deck_fs.files[p]  # Deck上でフォルダごと削除
+    deck_fs.files["/deck/games/Another/Game.exe"] = "exe"  # 格納先自体は残っている
+    assert sync_ctx.doujin_sync.unlink_deck([on_deck]) == [on_deck]
+    g = sync_ctx.doujin.get(on_deck)
+    assert (g.deck_dir, bool(g.local_path)) == ("", True)
+    assert sync_ctx.doujin_sync.status(on_deck).synced_before is False
+
+
+def test_unlink_deck_refuses_when_storage_is_missing(sync_ctx, deck_fs, on_deck):
+    deck_fs.files.clear()  # SDカードが抜けている
+    with pytest.raises(ValueError, match="SDカード"):
+        sync_ctx.doujin_sync.unlink_deck([on_deck])

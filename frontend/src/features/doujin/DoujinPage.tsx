@@ -5,6 +5,7 @@ import {
 } from '../../api'
 import { ErrorBox } from '../../components/ErrorBox'
 import { BulkRegisterDialog } from './BulkRegisterDialog'
+import { DeckCheckDialog } from './DeckCheckDialog'
 import { DeckImportDialog } from './DeckImportDialog'
 import { DoujinDetail } from './DoujinDetail'
 import { SteamBulkDialog } from './SteamBulkDialog'
@@ -30,7 +31,7 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [deckFilter, setDeckFilter] = useState<'' | 'on' | 'off'>('')
   const [steamFilter, setSteamFilter] = useState<'' | 'on' | 'off'>('')
   const [sort, setSort] = useState<Sort>('title')
-  const [dialog, setDialog] = useState<'bulk' | 'deck' | 'steam' | 'steam-import' | null>(null)
+  const [dialog, setDialog] = useState<'bulk' | 'deck' | 'deck-check' | 'steam' | 'steam-import' | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
   const all = useMemo(() => games.data ?? [], [games.data])
@@ -76,6 +77,7 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
         </button>
         <button className="btn" onClick={() => setDialog('bulk')}>まとめて登録</button>
         <button className="btn" onClick={() => setDialog('deck')}>Deckから取り込み</button>
+        <button className="btn" onClick={() => setDialog('deck-check')}>Deckと照合</button>
         <button className="btn" onClick={() => setDialog('steam-import')}>Steamから取り込み</button>
         <button className="btn" onClick={() => setDialog('steam')}>Steamにまとめて反映</button>
         <div className="toolbar-spacer" />
@@ -194,6 +196,17 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
           onDone={(updated) => {
             updated.forEach(upsert)
             setNotice(`Steamに${updated.length}件を反映しました。DeckでSteamを起動すると表示されます。`)
+          }}
+        />
+      )}
+      {dialog === 'deck-check' && (
+        <DeckCheckDialog
+          onClose={() => setDialog(null)}
+          onOpenSettings={() => { setDialog(null); onOpenSettings() }}
+          onOpenGame={setSelected}
+          onDone={(updated, message) => {
+            updated.forEach(upsert)
+            setNotice(message)
           }}
         />
       )}

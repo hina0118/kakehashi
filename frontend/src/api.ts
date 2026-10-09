@@ -272,6 +272,16 @@ export type PushResult = {
   conflicts: string[]
   errors: string[]
 }
+export type DeckCheckItem = {
+  id: number
+  title: string
+  deck_dir: string
+  status: 'folder_missing' | 'exe_missing' | 'unreachable'
+  exe: string
+  steam_registered: boolean
+}
+export type DeckCheck = { checked: number; problems: DeckCheckItem[] }
+
 export type DeckTextFile = { path: string; size: number; mtime: number }
 export type DeckText = { path: string; text: string; encoding: string; truncated: boolean }
 
@@ -336,6 +346,8 @@ export const doujinApi = {
     post<JobView<{ copied: number; version: string; exe_exists: boolean }>>(`${dj(id)}/update/apply`, { source, root, version }),
   scanDeck: () => post<DeckFolder[]>('/api/doujin/deck/scan'),
   importFromDeck: (paths: string[]) => post<DoujinGame[]>('/api/doujin/deck/import', { paths }),
+  checkDeck: () => post<DeckCheck>('/api/doujin/deck/check'),
+  unlinkDeck: (ids: number[]) => post<{ unlinked: number[] }>('/api/doujin/deck/unlink', { ids }),
 }
 
 // ---- Steam ----
