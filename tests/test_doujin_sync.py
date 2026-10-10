@@ -262,3 +262,11 @@ def test_status_reports_missing_pc_folder(sync_ctx, on_deck, tmp_path):
     assert sync_ctx.doujin_sync.status(on_deck).local_exists is False
     sync_ctx.doujin_sync.pull(on_deck, job())  # Deckから取り直せる
     assert (tmp_path / "pc_games" / "Game" / "maid/Game.exe").read_text() == "exe v1"
+
+
+def test_first_push_to_existing_deck_folder_names_the_duplicate(sync_ctx, on_deck, tmp_path):
+    write(tmp_path / "new" / "Game" / "maid/Game.exe", "exe v2")
+    dup = sync_ctx._doujin_db.create({"title": "Game v2", "local_path": str(tmp_path / "new" / "Game")})["id"]
+    with pytest.raises(ValueError, match="台帳の「Game」がすでにあります"):
+        sync_ctx.doujin_sync.push(dup, job(), base="/deck/games")
+    assert sync_ctx.doujin.get(dup).deck_dir == ""

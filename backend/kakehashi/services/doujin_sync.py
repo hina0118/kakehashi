@@ -507,6 +507,8 @@ class DoujinSyncService:
         with self._connect() as fs:
             remote = fs.walk_attrs(deck_dir)
             if snap is None and remote:
+                if not game["deck_dir"]:
+                    raise ValueError(self._existing_folder_message(game_id, deck_dir))
                 raise ValueError("Deck上の作品を正とするため、先に「Deckから取得」を実行してください。")
             snap = snap or {}
             tasks, kept, conflicts, unchanged = [], [], [], 0
@@ -548,6 +550,21 @@ class DoujinSyncService:
             kept_remote=kept, conflicts=conflicts, errors=res.errors,
         )
 
+    def _existing_folder_message(self, game_id: int, deck_dir: str) -> str:
+        """初めて送る先に、Deck上ですでにフォルダがあるときのエラー文。"""
+        owner = next(
+            (r for r in self._db.list() if r["id"] != game_id and (r["deck_dir"] or "").rstrip("/") == deck_dir.rstrip("/")),
+            None,
+        )
+        if owner is not None:
+            return (
+                f"送り先（{deck_dir}）には、台帳の「{owner['title'] or owner['id']}」がすでにあります（同じ作品の重複登録かもしれません）。"
+                "同じ作品なら、そちらで「Deckから取得」→「更新データを適用」（このフォルダを選ぶ）→「Deckへ反映」の順に更新してください。"
+            )
+        return (
+            f"送り先（{deck_dir}）に、同じ名前のフォルダがDeck上にすでにあります。上書きしないよう止めました。"
+            "別の格納先を選ぶか、「Deckから取り込み」でそのフォルダを台帳に取り込んでください。"
+        )
 
 def _local_files(folder: Path) -> list[str]:
     return sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file() and not p.name.endswith(".part"))
