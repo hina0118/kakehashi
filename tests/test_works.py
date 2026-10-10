@@ -137,3 +137,8 @@ def test_update_normalizes_tags(ctx):
     gid = ctx._doujin_db.create({"title": "x"})["id"]
     g = ctx.doujin.update(gid, DoujinPatch(tags=[" 人妻 ", "人妻・主婦", "", "3D作品", "RPG"]))
     assert g.tags == ["人妻・主婦", "3DCG", "RPG"]
+
+
+def test_normalize_tags_drops_store_only_tags():
+    from kakehashi.domain.tags import normalize_tags
+    assert normalize_tags(["男性向け", "RPG", "旧作", "コミケ105（2024冬）", "ゲーム性に定評", "デモ・体験版あり", "巨乳/爆乳"]) == ["RPG", "巨乳"]

@@ -2,9 +2,11 @@
 
 販売サイトによってジャンルの書き方が違う（DLsite は「/」区切り、FANZA は「・」区切りなど）ため、
 作品数の多い FANZA 側の表記にそろえる。意味の違うタグ（寝取らせ・寝取られない など）はまとめない。
+作品の中身に関係ない販売上の区分（男性向け・旧作・評価バッジなど）は取り除く。
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 
 TAG_ALIASES: dict[str, str] = {
@@ -45,6 +47,21 @@ TAG_ALIASES: dict[str, str] = {
     "屋外": "野外・露出",
 }
 
+IGNORED_TAGS: frozenset[str] = frozenset({
+    # 販売・対象の区分
+    "男性向け", "女性向け", "成人向け", "全年齢", "旧作", "DL版独占販売", "注目作品",
+    # 動作環境・体験版
+    "Windows10対応作品", "Windows11対応作品", "デモ・体験版あり", "体験版あり",
+    # ストアの評価バッジ（DMM のレビュー由来）
+    "ゲーム性に定評", "世界観がいい", "キャラクターがいい", "シナリオがいい", "CGがいい", "音楽がいい",
+})
+_IGNORED_PATTERN = re.compile(r"^コミケ\d+")
+"""コミケ104（2024夏）などのイベント名"""
+
+
+def is_ignored_tag(tag: str) -> bool:
+    return tag in IGNORED_TAGS or bool(_IGNORED_PATTERN.match(tag))
+
 
 def normalize_tag(tag: str) -> str:
     tag = tag.strip()
@@ -52,5 +69,5 @@ def normalize_tag(tag: str) -> str:
 
 
 def normalize_tags(tags: Iterable[str]) -> list[str]:
-    """前後の空白を除き、表記をそろえ、重複を除く（順序は保つ）。"""
-    return list(dict.fromkeys(t for t in map(normalize_tag, tags) if t))
+    """前後の空白を除き、表記をそろえ、作品に関係ないタグと重複を除く（順序は保つ）。"""
+    return list(dict.fromkeys(t for t in map(normalize_tag, tags) if t and not is_ignored_tag(t)))
