@@ -1601,6 +1601,30 @@ textarea {
   font-size: 12px;
 }
 
+.dup-note {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.dup-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dup-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
 .plain-list {
   margin: 0;
   padding-left: 18px;

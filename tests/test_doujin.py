@@ -199,3 +199,33 @@ def test_import_from_deck_links_existing_entry_instead_of_duplicating(ctx_doujin
     assert sorted(g.id for g in result) == sorted([by_id.id, by_name.id])
     assert len(ctx_doujin.doujin.list()) == 2
     assert ctx_doujin.doujin.get(by_id.id).deck_dir == "/deck/doujin/[X] Deck Name RJ333333"
+
+
+def test_title_key_ignores_versions_brackets_and_symbols():
+    from kakehashi.domain.doujin import title_key
+    assert title_key("ダンジョンなんて行かなければよかった Ver2.0.3") == title_key("ダンジョンなんて行かなければよかった")
+    assert title_key("小悪魔スマホ(製品版ver1.00.08a)") == title_key("小悪魔スマホ")
+    assert title_key("ＮＴＲ伝説 v1.2") == title_key("NTR伝説")
+    assert title_key("NTR伝説") != title_key("NTRレストラン")
+
+
+def test_find_duplicates_by_deck_folder_name_title_and_parent_work_id(ctx, tmp_path):
+    db = ctx._doujin_db
+    on_deck = db.create({"title": "ダンジョンなんて行かなければよかった", "deck_dir": "/sd/wingames/dungeon_nante"})["id"]
+    by_id = db.create({"title": "別名", "work_id": "d_586735"})["id"]
+    db.create({"title": "関係ない作品"})
+    folder = tmp_path / "d_586735" / "dungeon_nante"
+    folder.mkdir(parents=True)
+
+    hits = {h.id: h.reasons for h in ctx.doujin.find_duplicates(str(folder))}
+    assert hits == {on_deck: ["folder"], by_id: ["work_id"]}
+
+    titled = tmp_path / "ダンジョンなんて行かなければよかった Ver2.0.3"
+    titled.mkdir()
+    assert {h.id: h.reasons for h in ctx.doujin.find_duplicates(str(titled))} == {on_deck: ["title"]}
+
+    cands = {c.name: c for c in ctx.doujin.scan_parent(str(tmp_path))}
+    assert [h.id for h in cands[titled.name].duplicates] == [on_deck]
+    # 登録済みのフォルダ自身は重複として扱わない
+    g = ctx.doujin.register_folder(str(titled))
+    assert g.id not in {h.id for h in ctx.doujin.find_duplicates(str(titled))}

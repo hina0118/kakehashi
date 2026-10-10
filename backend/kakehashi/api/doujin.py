@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from kakehashi.api.deps import Ctx
 from kakehashi.domain.doujin import DoujinGame, DoujinPatch
 from kakehashi.domain.works import WorkInfo
-from kakehashi.services.doujin import DeckFolder, FolderCandidate, SearchResult
+from kakehashi.services.doujin import DeckFolder, DuplicateHit, FolderCandidate, SearchResult
 from kakehashi.services.doujin_sync import DeckCheck, SyncStatus, TextContent, TextFile, UpdatePlan
 from kakehashi.services.jobs import JobView
 from kakehashi.services.media import image_thumbnail
@@ -43,6 +43,11 @@ def register_many(ctx: Ctx, body: PathsRequest) -> list[DoujinGame]:
 @router.post("/scan-folder")
 def scan_folder(ctx: Ctx, body: PathRequest) -> list[FolderCandidate]:
     return ctx.doujin.scan_parent(body.path)
+
+
+@router.post("/duplicates")
+def find_duplicates(ctx: Ctx, body: PathRequest) -> list[DuplicateHit]:
+    return ctx.doujin.find_duplicates(body.path)
 
 
 @router.get("/games/{game_id}")

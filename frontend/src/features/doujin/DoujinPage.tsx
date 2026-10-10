@@ -1,15 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import {
-  PLAY_STATUSES, PLAY_STATUS_LABELS, api, doujinApi, doujinImageUrl, type DoujinGame, type PlayStatus,
+  PLAY_STATUSES, PLAY_STATUS_LABELS, api, doujinApi, doujinImageUrl, type DoujinGame, type DuplicateHit, type PlayStatus,
 } from '../../api'
 import { ErrorBox } from '../../components/ErrorBox'
 import { BulkRegisterDialog } from './BulkRegisterDialog'
 import { DeckCheckDialog } from './DeckCheckDialog'
 import { DeckImportDialog } from './DeckImportDialog'
 import { DoujinDetail } from './DoujinDetail'
+import { DuplicateDialog } from './DuplicateDialog'
 import { SteamBulkDialog } from './SteamBulkDialog'
 import { SteamImportDialog } from './SteamImportDialog'
+import { UpdateDialog } from './UpdateDialog'
 
 type Sort = 'title' | 'circle' | 'updated' | 'created' | 'release'
 
@@ -33,6 +35,8 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [sort, setSort] = useState<Sort>('title')
   const [dialog, setDialog] = useState<'bulk' | 'deck' | 'deck-check' | 'steam' | 'steam-import' | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [duplicate, setDuplicate] = useState<{ path: string; hits: DuplicateHit[] } | null>(null)
+  const [updating, setUpdating] = useState<{ game: DoujinGame; source: string } | null>(null)
 
   const all = useMemo(() => games.data ?? [], [games.data])
   const allTags = useMemo(() => [...new Set(all.flatMap((g) => g.tags))].sort((a, b) => a.localeCompare(b, 'ja')), [all])
@@ -56,16 +60,32 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
     )
   }
 
+  function registered(g: DoujinGame) {
+    upsert(g)
+    setSelected(g.id)
+    setNotice(`「${g.title}」を登録しました。`)
+  }
+
   const registerOne = useMutation({
     mutationFn: async () => {
       const [path] = await api.pickLocal('folder', '登録する作品のフォルダを選択')
-      return path ? doujinApi.register(path) : null
+      if (!path) return null
+      // 台帳に同じ作品がありそうなら、登録する前に確認する
+      const hits = await doujinApi.findDuplicates(path)
+      if (hits.length > 0) {
+        setDuplicate({ path, hits })
+        return null
+      }
+      return doujinApi.register(path)
     },
+    onSuccess: (g) => g && registered(g),
+  })
+
+  const registerAnyway = useMutation({
+    mutationFn: (path: string) => doujinApi.register(path),
     onSuccess: (g) => {
-      if (!g) return
-      upsert(g)
-      setSelected(g.id)
-      setNotice(`「${g.title}」を登録しました。`)
+      setDuplicate(null)
+      registered(g)
     },
   })
 
@@ -84,7 +104,7 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
         {notice && <span className="notice">{notice}</span>}
       </div>
 
-      {(games.error || registerOne.error) && <ErrorBox error={games.error ?? registerOne.error} />}
+      {(games.error || registerOne.error || registerAnyway.error) && <ErrorBox error={games.error ?? registerOne.error ?? registerAnyway.error} />}
 
       <div className="esde-body">
         <aside className="game-list">
@@ -196,6 +216,31 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
           onDone={(updated) => {
             updated.forEach(upsert)
             setNotice(`Steamに${updated.length}件を反映しました。DeckでSteamを起動すると表示されます。`)
+          }}
+        />
+      )}
+      {duplicate && (
+        <DuplicateDialog
+          path={duplicate.path}
+          hits={duplicate.hits}
+          onClose={() => setDuplicate(null)}
+          onRegister={() => registerAnyway.mutate(duplicate.path)}
+          onUseAsUpdate={(g) => {
+            upsert(g)
+            setSelected(g.id)
+            setUpdating({ game: g, source: duplicate.path })
+            setDuplicate(null)
+          }}
+        />
+      )}
+      {updating && (
+        <UpdateDialog
+          game={updating.game}
+          initialSource={updating.source}
+          onClose={() => setUpdating(null)}
+          onApplied={(g) => {
+            upsert(g)
+            setNotice(`「${g.title}」に更新データを適用しました。「Deckへ反映」で送ってください。`)
           }}
         />
       )}

@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from kakehashi.config import Config
 from kakehashi.domain.doujin import (
     IMAGE_KINDS, DoujinGame, DoujinImage, DoujinPatch, FolderGuess, guess_from_folder_name,
-    rank_exe_candidates,
+    rank_exe_candidates, title_key,
 )
 from kakehashi.domain.media import IMAGE_SUFFIXES
 from kakehashi.domain.tags import normalize_tags
@@ -25,11 +25,23 @@ from kakehashi.infra.deck import DeckConnector
 from kakehashi.infra.doujin_db import DoujinDB
 
 
+class DuplicateHit(BaseModel):
+    """登録しようとしているフォルダと同じ作品かもしれない、台帳の作品。"""
+    id: int
+    title: str
+    reasons: list[str]
+    """一致したもの: work_id（作品ID）/ folder（フォルダ名）/ title（タイトル）"""
+    deck_dir: str
+    has_local: bool
+    """PC側の作品フォルダがあるか（無ければ更新データを適用する前に「Deckから取得」が要る）"""
+
+
 class FolderCandidate(BaseModel):
     path: str
     name: str
     guess: FolderGuess
     registered_id: int | None = None
+    duplicates: list[DuplicateHit] = []
 
 
 class SearchResult(BaseModel):
@@ -89,15 +101,54 @@ class DoujinService:
         root = Path(parent)
         if not root.is_dir():
             raise NotFoundError(f"フォルダが見つかりません: {parent}")
-        registered = {_norm(r["local_path"]): r["id"] for r in self._db.list() if r["local_path"]}
-        return [
-            FolderCandidate(
-                path=str(d), name=d.name, guess=guess_from_folder_name(d.name),
-                registered_id=registered.get(_norm(str(d))),
-            )
-            for d in sorted(root.iterdir(), key=lambda p: p.name.lower())
-            if d.is_dir() and not d.name.startswith(".")
-        ]
+        rows = self._db.list()
+        registered = {_norm(r["local_path"]): r["id"] for r in rows if r["local_path"]}
+        out = []
+        for d in sorted(root.iterdir(), key=lambda p: p.name.lower()):
+            if not d.is_dir() or d.name.startswith("."):
+                continue
+            registered_id = registered.get(_norm(str(d)))
+            out.append(FolderCandidate(
+                path=str(d), name=d.name, guess=guess_from_folder_name(d.name), registered_id=registered_id,
+                duplicates=[] if registered_id is not None else self._duplicates(d, rows),
+            ))
+        return out
+
+    def find_duplicates(self, path: str) -> list[DuplicateHit]:
+        """登録しようとしているフォルダと同じ作品かもしれない台帳の作品を探す。"""
+        folder = Path(path)
+        if not folder.is_dir():
+            raise NotFoundError(f"フォルダが見つかりません: {path}")
+        return self._duplicates(folder, self._db.list())
+
+    def _duplicates(self, folder: Path, rows: list[dict]) -> list[DuplicateHit]:
+        guess = guess_from_folder_name(folder.name)
+        # 作品IDはフォルダ名に無ければ親フォルダ名からも探す（"d_586735/dungeon_nante" のような置き方）
+        work_id = (guess.work_id or guess_from_folder_name(folder.parent.name).work_id).casefold()
+        name = folder.name.casefold()
+        key = title_key(guess.title)
+        pc_base = self._get_config().windows.doujin_base
+        hits = []
+        for r in rows:
+            if r["local_path"] and _norm(r["local_path"]) == _norm(str(folder)):
+                continue
+            reasons = []
+            if work_id and r["work_id"].casefold() == work_id:
+                reasons.append("work_id")
+            names = {PurePosixPath(r["deck_dir"]).name, Path(r["local_path"]).name if r["local_path"] else ""}
+            if name in {n.casefold() for n in names if n}:
+                reasons.append("folder")
+            if len(key) >= 2 and title_key(r["title"]) == key:
+                reasons.append("title")
+            if reasons:
+                local = Path(r["local_path"]) if r["local_path"] else (
+                    Path(pc_base) / PurePosixPath(r["deck_dir"]).name if pc_base and r["deck_dir"] else None
+                )
+                hits.append(DuplicateHit(
+                    id=r["id"], title=r["title"], reasons=reasons, deck_dir=r["deck_dir"],
+                    has_local=bool(local and local.is_dir()),
+                ))
+        return hits
 
     def register_many(self, paths: list[str]) -> list[DoujinGame]:
         created = []

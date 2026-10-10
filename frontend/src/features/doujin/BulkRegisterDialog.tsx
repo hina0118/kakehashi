@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { api, doujinApi, type DoujinGame, type FolderCandidate } from '../../api'
+import { api, describeDuplicate, doujinApi, type DoujinGame, type FolderCandidate } from '../../api'
 import { ErrorBox } from '../../components/ErrorBox'
 import { Modal } from '../../components/Modal'
 
@@ -21,7 +21,8 @@ export function BulkRegisterDialog({ onClose, onRegistered }: Props) {
       setBusy(true)
       const list = await doujinApi.scanFolder(path)
       setCands(list)
-      setChecked(new Set(list.filter((c) => c.registered_id === null).map((c) => c.path)))
+      // 台帳の作品と重複していそうなフォルダは、最初はチェックを外しておく
+      setChecked(new Set(list.filter((c) => c.registered_id === null && c.duplicates.length === 0).map((c) => c.path)))
     } catch (e) {
       setError(e)
     } finally {
@@ -65,9 +66,17 @@ export function BulkRegisterDialog({ onClose, onRegistered }: Props) {
         <span className="muted">{parent || '作品フォルダが並んでいるフォルダを選ぶと、中の作品を一覧にします。'}</span>
       </div>
       {error != null && <ErrorBox error={error} />}
+      {cands?.some((c) => c.duplicates.length > 0) && (
+        <p className="steam-state ng">
+          台帳の作品と同じかもしれないフォルダはチェックを外しています。同じ作品なら、登録せずに台帳の作品で「更新データを適用」を使ってください。
+        </p>
+      )}
       {cands && (
         <CandidateTable
-          rows={cands.map((c) => ({ key: c.path, name: c.name, guess: c.guess, done: c.registered_id !== null }))}
+          rows={cands.map((c) => ({
+            key: c.path, name: c.name, guess: c.guess, done: c.registered_id !== null,
+            sub: c.duplicates.map(describeDuplicate).join(' / ') || undefined, warn: c.duplicates.length > 0,
+          }))}
           checked={checked}
           onToggle={toggle}
           doneLabel="登録済み"
@@ -78,7 +87,7 @@ export function BulkRegisterDialog({ onClose, onRegistered }: Props) {
 }
 
 export function CandidateTable({ rows, checked, onToggle, doneLabel }: {
-  rows: { key: string; name: string; guess: { title: string; circle: string; work_id: string }; done: boolean; sub?: string }[]
+  rows: { key: string; name: string; guess: { title: string; circle: string; work_id: string }; done: boolean; sub?: string; warn?: boolean }[]
   checked: Set<string>
   onToggle: (key: string) => void
   doneLabel: string
@@ -98,7 +107,7 @@ export function CandidateTable({ rows, checked, onToggle, doneLabel }: {
                   <input type="checkbox" checked={checked.has(r.key)} onChange={() => onToggle(r.key)} onClick={(e) => e.stopPropagation()} />
                 )}
               </td>
-              <td className="coverage-title" title={r.key}>{r.name}{r.sub && <div className="muted">{r.sub}</div>}</td>
+              <td className="coverage-title" title={r.key}>{r.name}{r.sub && <div className={r.warn ? 'dup-note' : 'muted'}>{r.sub}</div>}</td>
               <td className="coverage-title">{r.guess.title}</td>
               <td className="coverage-title">{r.guess.circle}</td>
               <td>{r.guess.work_id}</td>

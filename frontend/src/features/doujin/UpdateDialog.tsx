@@ -1,17 +1,23 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api, doujinApi, type DoujinGame, type UpdatePlan } from '../../api'
 import { ErrorBox } from '../../components/ErrorBox'
 import { Modal } from '../../components/Modal'
 import { useRunJob } from '../../lib/jobs'
 
-type Props = { game: DoujinGame; onClose: () => void; onApplied: (g: DoujinGame) => void }
+type Props = {
+  game: DoujinGame
+  onClose: () => void
+  onApplied: (g: DoujinGame) => void
+  /** 最初から選んでおく更新データのフォルダ */
+  initialSource?: string
+}
 
 const STATUS_LABELS = { new: '追加', changed: '変更' } as const
 
 /** 展開済みの更新データ（フォルダ）を、PC側の作品フォルダに重ねる。 */
-export function UpdateDialog({ game, onClose, onApplied }: Props) {
+export function UpdateDialog({ game, onClose, onApplied, initialSource }: Props) {
   const runJob = useRunJob()
-  const [source, setSource] = useState('')
+  const [source, setSource] = useState(initialSource ?? '')
   const [plan, setPlan] = useState<UpdatePlan | null>(null)
   const [version, setVersion] = useState('')
   const [busy, setBusy] = useState<'pick' | 'plan' | 'apply' | null>(null)
@@ -31,6 +37,12 @@ export function UpdateDialog({ game, onClose, onApplied }: Props) {
       setBusy(null)
     }
   }
+
+  useEffect(() => {
+    if (initialSource) makePlan(initialSource)
+    // 開いたときに一度だけ調べる
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function pick() {
     setBusy('pick')

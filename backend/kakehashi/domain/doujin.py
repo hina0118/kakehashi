@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import datetime
 from typing import Literal
 
@@ -127,6 +128,19 @@ def guess_from_folder_name(name: str) -> FolderGuess:
     return FolderGuess(
         title=rest or name, circle=circle, work_id=work_id, store=store, url=work_url(work_id, store),
     )
+
+
+_BRACKETED = re.compile(r"[\[【(（「『〔].*?[\]】)）」』〕]")
+_VERSION_WORD = re.compile(r"(?<![a-z])(?:ver|v)\.?\s*\d+(?:[._,]\d+)*[a-z]?|製品版|体験版|完全版|DL版|リメイク版")
+_NOT_WORD = re.compile(r"[\W_]+")
+
+
+def title_key(title: str) -> str:
+    """同じ作品かを比べるためのタイトルの正規化（括弧書き・バージョン・記号・空白を除く）。"""
+    s = unicodedata.normalize("NFKC", title).casefold()
+    s = _BRACKETED.sub("", s)
+    s = _VERSION_WORD.sub("", s)
+    return _NOT_WORD.sub("", s)
 
 
 # 起動ファイルの候補から除外する名前（アンインストーラ・ランタイム・設定ツールなど）

@@ -213,7 +213,27 @@ export type DoujinPatch = Partial<
 >
 
 export type FolderGuess = { title: string; circle: string; work_id: string; store: string; url: string }
-export type FolderCandidate = { path: string; name: string; guess: FolderGuess; registered_id: number | null }
+export type DuplicateHit = {
+  id: number
+  title: string
+  reasons: ('work_id' | 'folder' | 'title')[]
+  deck_dir: string
+  has_local: boolean
+}
+export const DUPLICATE_REASON_LABELS: Record<DuplicateHit['reasons'][number], string> = {
+  work_id: '作品ID',
+  folder: 'フォルダ名',
+  title: 'タイトル',
+}
+export const describeDuplicate = (h: DuplicateHit) =>
+  `台帳の「${h.title || h.id}」と同じ作品かもしれません（${h.reasons.map((r) => DUPLICATE_REASON_LABELS[r]).join('・')}が一致）`
+export type FolderCandidate = {
+  path: string
+  name: string
+  guess: FolderGuess
+  registered_id: number | null
+  duplicates: DuplicateHit[]
+}
 export type DeckFolder = {
   base: string
   name: string
@@ -326,6 +346,7 @@ export const doujinApi = {
   list: () => request<DoujinGame[]>('/api/doujin/games'),
   get: (id: number) => request<DoujinGame>(dj(id)),
   register: (path: string) => post<DoujinGame>('/api/doujin/games', { path }),
+  findDuplicates: (path: string) => post<DuplicateHit[]>('/api/doujin/duplicates', { path }),
   scanFolder: (path: string) => post<FolderCandidate[]>('/api/doujin/scan-folder', { path }),
   registerMany: (paths: string[]) => post<DoujinGame[]>('/api/doujin/games/register-many', { paths }),
   update: (id: number, patch: DoujinPatch) =>
