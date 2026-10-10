@@ -209,6 +209,8 @@ __marimo__/
 # kakehashi runtime
 config.json
 work/
+# PC側の同人ゲームフォルダをリポジトリ内に置いたとき
+/doujin/
 # 旧版（tkinterアプリ）が作っていたファイル
 window_state.json
 

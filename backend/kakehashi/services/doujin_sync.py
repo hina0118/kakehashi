@@ -53,6 +53,8 @@ class SyncStatus(BaseModel):
     synced_before: bool
     """前回同期した記録があるか"""
     local_dir: str
+    local_exists: bool = True
+    """PC側の作品フォルダがあるか（無ければ local_changed などは空になる）"""
     local_changed: list[str] = []
     """PCで変わった（Deckへ送る）ファイル"""
     remote_changed: list[str] = []
@@ -397,7 +399,7 @@ class DoujinSyncService:
             elif rc:
                 remote_changed.append(rel)
         return SyncStatus(
-            synced_before=snap is not None, local_dir=str(local_dir),
+            synced_before=snap is not None, local_dir=str(local_dir), local_exists=local_dir.is_dir(),
             local_changed=local_changed, remote_changed=remote_changed, conflicts=conflicts,
         )
 

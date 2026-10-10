@@ -163,12 +163,21 @@ export function SyncSection({ game, dirty, onDone, onOpenSettings }: Props) {
       )}
       {status && (
         <div className="sync-result">
-          {!status.synced_before && <span className="muted">まだDeckと同期していません。</span>}
-          <FileList label="PCで変わった（反映すると送る）" files={status.local_changed} />
-          <FileList label="Deckで変わった（取得すると更新される）" files={status.remote_changed} />
-          <FileList label="両方で変わった" files={status.conflicts} danger />
-          {!status.local_changed.length && !status.remote_changed.length && !status.conflicts.length && (
-            <span className="notice">PCとDeckは同じ内容です。</span>
+          {!status.local_exists ? (
+            <span className="steam-state ng">
+              PC側の作品フォルダがありません（{status.local_dir}）。
+              {game.deck_dir ? '「Deckから取得」で取り直せます。' : 'Deckにも無いため、取り直せません。'}
+            </span>
+          ) : (
+            <>
+              {!status.synced_before && <span className="muted">まだDeckと同期していません。</span>}
+              <FileList label="PCで変わった（反映すると送る）" files={status.local_changed} />
+              <FileList label="Deckで変わった（取得すると更新される）" files={status.remote_changed} />
+              <FileList label="両方で変わった" files={status.conflicts} danger />
+              {!status.local_changed.length && !status.remote_changed.length && !status.conflicts.length && (
+                <span className="notice">PCとDeckは同じ内容です。</span>
+              )}
+            </>
           )}
         </div>
       )}

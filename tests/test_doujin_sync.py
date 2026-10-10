@@ -252,3 +252,13 @@ def test_move_refuses_unsafe_moves(two_bases, deck_fs, on_deck):
     with pytest.raises(ValueError, match="同じ名前"):
         two_bases.doujin_sync.move(on_deck, "/sd/games")
     assert f"{DECK}/maid/Game.exe" in deck_fs.files
+
+
+def test_status_reports_missing_pc_folder(sync_ctx, on_deck, tmp_path):
+    import shutil
+    sync_ctx.doujin_sync.pull(on_deck, job())
+    assert sync_ctx.doujin_sync.status(on_deck).local_exists is True
+    shutil.rmtree(tmp_path / "pc_games" / "Game")
+    assert sync_ctx.doujin_sync.status(on_deck).local_exists is False
+    sync_ctx.doujin_sync.pull(on_deck, job())  # Deckから取り直せる
+    assert (tmp_path / "pc_games" / "Game" / "maid/Game.exe").read_text() == "exe v1"

@@ -295,6 +295,7 @@ export type DeckText = { path: string; text: string; encoding: string; truncated
 export type SyncStatus = {
   synced_before: boolean
   local_dir: string
+  local_exists: boolean
   local_changed: string[]
   remote_changed: string[]
   conflicts: string[]
