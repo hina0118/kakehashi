@@ -122,3 +122,18 @@ def test_fetch_work_dispatches_by_store(ctx, monkeypatch):
     assert ctx.doujin.fetch_work("dmm_games", "clear_0047").store == "dmm_games"
     with pytest.raises(ValueError):
         ctx.doujin.fetch_work("booth", "123")
+
+
+def test_fetch_work_normalizes_genres_to_catalog_tags(ctx, monkeypatch):
+    from kakehashi.domain.works import WorkInfo
+    info = WorkInfo(store="dlsite", work_id="RJ1", title="t", url="u",
+                    genres=["巨乳/爆乳", "寝取られ", "寝取り", "ラブラブ/あまあま", "寝取らせ"])
+    monkeypatch.setattr(dlsite, "fetch", lambda work_id: info)
+    assert ctx.doujin.fetch_work("dlsite", " RJ1 ").genres == ["巨乳", "寝取り・寝取られ・NTR", "ラブラブ・あまあま", "寝取らせ"]
+
+
+def test_update_normalizes_tags(ctx):
+    from kakehashi.domain.doujin import DoujinPatch
+    gid = ctx._doujin_db.create({"title": "x"})["id"]
+    g = ctx.doujin.update(gid, DoujinPatch(tags=[" 人妻 ", "人妻・主婦", "", "3D作品", "RPG"]))
+    assert g.tags == ["人妻・主婦", "3DCG", "RPG"]

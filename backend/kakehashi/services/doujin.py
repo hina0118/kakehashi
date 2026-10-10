@@ -17,6 +17,7 @@ from kakehashi.domain.doujin import (
     rank_exe_candidates,
 )
 from kakehashi.domain.media import IMAGE_SUFFIXES
+from kakehashi.domain.tags import normalize_tags
 from kakehashi.errors import NotFoundError
 from kakehashi.domain.works import WorkHit, WorkInfo
 from kakehashi.infra import dlsite, dmm, downloader
@@ -108,8 +109,8 @@ class DoujinService:
     def update(self, game_id: int, patch: DoujinPatch) -> DoujinGame:
         changes = patch.changes()
         if "tags" in changes:
-            # 空白の除去と重複の排除（順序は保つ）
-            changes["tags"] = list(dict.fromkeys(t.strip() for t in changes["tags"] or [] if t.strip()))
+            # 空白の除去・表記ゆれの統一・重複の排除（順序は保つ）
+            changes["tags"] = normalize_tags(changes["tags"] or [])
         if "exe" in changes:
             changes["exe"] = (changes["exe"] or "").replace("\\", "/").lstrip("/")
         return self._model(self._db.update(game_id, changes))
@@ -204,8 +205,11 @@ class DoujinService:
     # ---- DLsite ----
 
     def fetch_work(self, store: str, work_id: str) -> WorkInfo:
-        """販売サイトの作品ページから作品情報を取得する。"""
-        work_id = work_id.strip()
+        """販売サイトの作品ページから作品情報を取得する。ジャンルは台帳のタグの表記にそろえる。"""
+        info = self._fetch_work(store, work_id.strip())
+        return info.model_copy(update={"genres": normalize_tags(info.genres)})
+
+    def _fetch_work(self, store: str, work_id: str) -> WorkInfo:
         if store == "dlsite":
             return dlsite.fetch(work_id)
         if store == "fanza":
