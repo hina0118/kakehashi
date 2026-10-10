@@ -143,6 +143,27 @@ def pull(ctx: Ctx, game_id: int, body: PullRequest) -> JobView:
     )
 
 
+class MoveRequest(BaseModel):
+    base: str
+    """移動先の格納先"""
+
+
+@router.post("/games/{game_id}/move")
+def move(ctx: Ctx, game_id: int, body: MoveRequest) -> JobView:
+    game = ctx.doujin.get(game_id)
+
+    def run(job):
+        result = ctx.doujin_sync.move(game_id, body.base, job).model_dump()
+        result["steam"] = None
+        if game.steam_registered_at:
+            job.log("Steamの登録を移動先に合わせます")
+            [r] = ctx.steam.apply([game_id], job)
+            result["steam"] = r.model_dump()
+        return result
+
+    return ctx.jobs.submit("doujin.move", f"{game.title or f'id={game_id}'} を {body.base} へ移動", run)
+
+
 @router.get("/games/{game_id}/sync-status")
 def sync_status(ctx: Ctx, game_id: int) -> SyncStatus:
     return ctx.doujin_sync.status(game_id)

@@ -22,6 +22,8 @@ class MemoryFS:
         self.commands: list[str] = []
         self.mtimes: dict[str, int] = {}
         self._clock = 1000
+        self.disks: dict[str, tuple[int, int]] = {}
+        """ドライブ: パスの先頭 → (デバイス番号, 空き容量)。該当しなければ (0, 大きな値)"""
 
     def read_text(self, path: str) -> str:
         data = self.read_bytes(path)
@@ -64,6 +66,20 @@ class MemoryFS:
         if "pgrep" in command:
             return 0, ("running" if self.steam_running else "stopped") + "\n", ""
         return 0, "", ""
+
+    def disk(self, path: str) -> tuple[int, int]:
+        for prefix, info in self.disks.items():
+            if path.startswith(prefix):
+                return info
+        return 0, 10**12
+
+    def move(self, src: str, dst: str) -> None:
+        prefix = src.rstrip("/") + "/"
+        for p in [p for p in self.files if p.startswith(prefix)]:
+            q = dst.rstrip("/") + "/" + p[len(prefix):]
+            self.files[q] = self.files.pop(p)
+            if p in self.mtimes:
+                self.mtimes[q] = self.mtimes.pop(p)
 
     def listdir(self, path: str) -> list[str]:
         prefix = path.rstrip("/") + "/"

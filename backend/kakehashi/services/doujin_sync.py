@@ -27,12 +27,15 @@ from kakehashi.errors import NotFoundError
 from kakehashi.infra.deck import DeckConnector
 from kakehashi.infra.doujin_db import DoujinDB
 from kakehashi.services.jobs import Job
+from kakehashi.services.steam import SteamRunningError
 
 Attrs = tuple[int, int]
 """(サイズ, 更新日時[秒])"""
 
 _VERSION = re.compile(r"(?<![A-Za-z])(?:ver|v)\.?\s*(\d+(?:[._]\d+)*[a-z]?)", re.IGNORECASE)
 _LIST_LIMIT = 300
+_FREE_MARGIN = 256 * 1024 * 1024
+"""別のドライブへ移すとき、移動後にも残しておく空き容量"""
 
 
 class PullResult(BaseModel):
@@ -135,6 +138,14 @@ class DeckCheck(BaseModel):
     problems: list[DeckCheckItem]
 
 
+class MoveResult(BaseModel):
+    deck_dir: str
+    """移動先の作品フォルダ"""
+    size: int
+    cross_device: bool
+    """別のドライブ（内蔵⇔SDカード）への移動だったか（コピーしてから元を消した）"""
+
+
 class SnapshotStore:
     """作品ごとの「前回同期したときのDeck上のファイルの状態」。"""
 
@@ -183,6 +194,55 @@ class DoujinSyncService:
         if not game["deck_dir"]:
             raise ValueError("PC側の作品フォルダが設定されていません。")
         return Path(base) / PurePosixPath(game["deck_dir"]).name
+
+    # ---- Deck上で格納先を移す ----
+
+    def move(self, game_id: int, dest_base: str, job: Job | None = None) -> MoveResult:
+        """Deck上の作品フォルダを別の格納先へ移す。同期の記録は相対パスなのでそのまま使える。
+
+        Steamに登録済みの作品は、移したあとでSteamの登録を新しい場所に合わせる必要がある（呼び出し側で行う）。
+        そのため、Steamが起動中なら移す前に止める。
+        """
+        game = self._db.get(game_id)
+        src = (game["deck_dir"] or "").rstrip("/")
+        if not src:
+            raise ValueError("Deck上の作品フォルダが設定されていません。")
+        dest_base = dest_base.rstrip("/")
+        if dest_base not in [b.rstrip("/") for b in self._get_config().steam_deck.doujin_base]:
+            raise ValueError(f"設定にない格納先です: {dest_base}")
+        if posixpath.dirname(src) == dest_base:
+            raise ValueError("すでにこの格納先にあります。")
+        dst = f"{dest_base}/{posixpath.basename(src)}"
+
+        with self._connect() as fs:
+            if game["steam_registered_at"] is not None:
+                _code, out, _err = fs.run("pgrep -x steam >/dev/null && echo running || echo stopped")
+                if "running" in out:
+                    raise SteamRunningError(
+                        "DeckでSteamが起動しています。Steamの登録も移動先に合わせるため、"
+                        "デスクトップモードに切り替えてSteamを終了してから実行してください。"
+                    )
+            if not fs.exists(src):
+                raise NotFoundError(f"Deck上に作品フォルダが見つかりません: {src}")
+            if not fs.exists(dest_base):
+                raise ValueError(f"移動先の格納先が見つかりません（SDカードが抜けていませんか）: {dest_base}")
+            if fs.exists(dst):
+                raise ValueError(f"移動先に同じ名前のフォルダがあります: {dst}")
+
+            size = sum(sz for sz, _mtime in fs.walk_attrs(src).values())
+            src_dev, _ = fs.disk(src)
+            dst_dev, free = fs.disk(dest_base)
+            cross = src_dev != dst_dev
+            if cross and free < size + _FREE_MARGIN:
+                raise ValueError(
+                    f"移動先の空き容量が足りません（必要 {_gb(size)}、空き {_gb(free)}）: {dest_base}"
+                )
+            if job:
+                job.log(f"{src} → {dst}" + (f"（別のドライブへコピー: {_gb(size)}）" if cross else ""))
+            fs.move(src, dst)
+
+        self._db.update(game_id, {"deck_dir": dst})
+        return MoveResult(deck_dir=dst, size=size, cross_device=cross)
 
     # ---- Deck上で削除された作品を見つける ----
 
@@ -582,3 +642,7 @@ def decode_text(data: bytes, truncated: bool = False) -> tuple[str, str]:
             except UnicodeDecodeError:
                 continue
     return data.decode("cp932", errors="replace"), "Shift_JIS"
+
+
+def _gb(n: int) -> str:
+    return f"{n / 1024**3:.1f} GB" if n >= 1024**3 else f"{n / 1024**2:.0f} MB"

@@ -272,6 +272,13 @@ export type PushResult = {
   conflicts: string[]
   errors: string[]
 }
+export type MoveResult = {
+  deck_dir: string
+  size: number
+  cross_device: boolean
+  steam: SteamGameResult | null
+}
+
 export type DeckCheckItem = {
   id: number
   title: string
@@ -337,6 +344,7 @@ export const doujinApi = {
   pull: (id: number, force = false) => post<JobView<PullResult>>(`${dj(id)}/pull`, { force }),
   push: (id: number, base: string | null, force = false) => post<JobView<PushResult>>(`${dj(id)}/push`, { base, force }),
   syncStatus: (id: number) => request<SyncStatus>(`${dj(id)}/sync-status`),
+  move: (id: number, base: string) => post<JobView<MoveResult>>(`${dj(id)}/move`, { base }),
   deckTexts: (id: number) => request<DeckTextFile[]>(`${dj(id)}/deck-texts`),
   deckText: (id: number, path: string) =>
     request<DeckText>(`${dj(id)}/deck-text?${new URLSearchParams({ path })}`),

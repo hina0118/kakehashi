@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { api, doujinApi, type DoujinGame, type PullResult, type PushResult, type SyncStatus } from '../../api'
+import { api, doujinApi, type DoujinGame, type MoveResult, type PullResult, type PushResult, type SyncStatus } from '../../api'
 import { ErrorBox } from '../../components/ErrorBox'
 import { useRunJob } from '../../lib/jobs'
 import { DeckTextDialog } from './DeckTextDialog'
@@ -20,17 +20,22 @@ export function SyncSection({ game, dirty, onDone, onOpenSettings }: Props) {
   const bases = settings.data?.steam_deck.doujin_base ?? []
   const pcBase = settings.data?.windows.doujin_base ?? ''
   const [base, setBase] = useState('')
-  const [busy, setBusy] = useState<'pull' | 'push' | 'status' | null>(null)
+  const [busy, setBusy] = useState<'pull' | 'push' | 'status' | 'move' | null>(null)
   const [error, setError] = useState<unknown>(null)
   const [pulled, setPulled] = useState<PullResult | null>(null)
   const [pushed, setPushed] = useState<PushResult | null>(null)
   const [status, setStatus] = useState<SyncStatus | null>(null)
   const [showUpdate, setShowUpdate] = useState(false)
   const [showTexts, setShowTexts] = useState(false)
+  const [moved, setMoved] = useState<MoveResult | null>(null)
+  const currentBase = game.deck_dir ? game.deck_dir.replace(/\/+$/, '').replace(/\/[^/]*$/, '') : ''
+  const moveTargets = bases.filter((b) => b.replace(/\/+$/, '') !== currentBase)
+  const [moveTo, setMoveTo] = useState('')
+  const chosenMoveTo = moveTargets.includes(moveTo) ? moveTo : moveTargets[0] ?? ''
   const chosenBase = base || bases[0] || ''
   const hasLocal = !!game.local_path || (!!pcBase && !!game.deck_dir)
 
-  async function act<T>(kind: 'pull' | 'push' | 'status', fn: () => Promise<T>, done: (r: T) => void) {
+  async function act<T>(kind: 'pull' | 'push' | 'status' | 'move', fn: () => Promise<T>, done: (r: T) => void) {
     setBusy(kind)
     setError(null)
     try {
@@ -50,6 +55,11 @@ export function SyncSection({ game, dirty, onDone, onOpenSettings }: Props) {
     act('pull', () => runJob(() => doujinApi.pull(game.id, force)), (r) => { setPulled(r); setPushed(null) })
   const push = (force = false) =>
     act('push', () => runJob(() => doujinApi.push(game.id, game.deck_dir ? null : chosenBase, force)), (r) => { setPushed(r); setPulled(null) })
+  const move = () => {
+    const note = game.steam_registered_at ? '\nSteamの登録も移動先に合わせます（DeckでSteamを終了しておいてください）。' : ''
+    if (!confirm(`Deck上の作品フォルダを ${chosenMoveTo} へ移動しますか？\n内蔵ストレージとSDカードの間では、コピーに時間がかかります。${note}`)) return
+    act('move', () => runJob(() => doujinApi.move(game.id, chosenMoveTo)), (r) => { setMoved(r); setPulled(null); setPushed(null) })
+  }
   const checkStatus = () =>
     act('status', () => doujinApi.syncStatus(game.id), (r) => { setStatus(r); setPulled(null); setPushed(null) })
 
@@ -93,6 +103,17 @@ export function SyncSection({ game, dirty, onDone, onOpenSettings }: Props) {
           テキストを読む
         </button>
       </div>
+      {game.deck_dir && moveTargets.length > 0 && (
+        <div className="transfer-row">
+          <span className="muted">格納先を移す:</span>
+          <select value={chosenMoveTo} onChange={(e) => setMoveTo(e.target.value)} aria-label="移動先の格納先">
+            {moveTargets.map((b) => <option key={b} value={b}>{b}</option>)}
+          </select>
+          <button className="btn small" disabled={busy !== null || dirty} onClick={move}>
+            {busy === 'move' ? '移動中…' : '移動'}
+          </button>
+        </div>
+      )}
       <p className="hint">
         Deck上のファイルを正とします。「Deckから取得」→「更新データを適用」→「Deckへ反映」の順に使います。
         反映ではPCで変わったファイルだけを送り、Deckで変わったファイル（セーブなど）は上書きしません。どちらでもファイルは削除しません。
@@ -126,6 +147,17 @@ export function SyncSection({ game, dirty, onDone, onOpenSettings }: Props) {
               action="PCの内容で上書きして反映"
               onAction={() => { if (confirm('Deckで変わった内容（セーブなど）が失われることがあります。PCの内容で上書きしますか？')) push(true) }}
             />
+          )}
+        </div>
+      )}
+      {moved && (
+        <div className="sync-result">
+          <span className="notice">
+            {moved.deck_dir} へ移動しました{moved.cross_device ? '（別のドライブへコピーしてから元を削除）' : ''}。
+            {moved.steam && !moved.steam.error && 'Steamの登録も移動先に合わせました。'}
+          </span>
+          {moved.steam?.error && (
+            <span className="steam-state ng">Steamの登録を合わせられませんでした: {moved.steam.error}（「Steamに反映」でやり直せます）</span>
           )}
         </div>
       )}

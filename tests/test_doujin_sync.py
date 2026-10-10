@@ -220,3 +220,35 @@ def test_unlink_deck_refuses_when_storage_is_missing(sync_ctx, deck_fs, on_deck)
     deck_fs.files.clear()  # SDカードが抜けている
     with pytest.raises(ValueError, match="SDカード"):
         sync_ctx.doujin_sync.unlink_deck([on_deck])
+
+
+@pytest.fixture
+def two_bases(sync_ctx, deck_fs, on_deck):
+    sync_ctx.config.steam_deck = DeckPaths(**{**sync_ctx.config.steam_deck.model_dump(), "doujin_base": ["/deck/games", "/sd/games"]})
+    deck_fs.files["/sd/games/Other/a.exe"] = "x"
+    return sync_ctx
+
+
+def test_move_keeps_snapshot_valid(two_bases, deck_fs, on_deck):
+    two_bases.doujin_sync.pull(on_deck, job())
+    r = two_bases.doujin_sync.move(on_deck, "/sd/games", job())
+    assert (r.deck_dir, r.cross_device) == ("/sd/games/Game", False)
+    assert "/sd/games/Game/maid/Game.exe" in deck_fs.files and f"{DECK}/maid/Game.exe" not in deck_fs.files
+    assert two_bases.doujin.get(on_deck).deck_dir == "/sd/games/Game"
+    s = two_bases.doujin_sync.status(on_deck)  # 更新日時も移るので、差分は出ない
+    assert (s.local_changed, s.remote_changed, s.conflicts) == ([], [], [])
+
+
+def test_move_refuses_unsafe_moves(two_bases, deck_fs, on_deck):
+    with pytest.raises(ValueError, match="すでに"):
+        two_bases.doujin_sync.move(on_deck, "/deck/games")
+    with pytest.raises(ValueError, match="設定にない"):
+        two_bases.doujin_sync.move(on_deck, "/tmp")
+    deck_fs.disks = {"/deck/": (1, 10**12), "/sd/": (2, 10)}  # 別のドライブで空きが足りない
+    with pytest.raises(ValueError, match="空き容量"):
+        two_bases.doujin_sync.move(on_deck, "/sd/games")
+    deck_fs.disks = {}
+    deck_fs.files["/sd/games/Game/x"] = "x"
+    with pytest.raises(ValueError, match="同じ名前"):
+        two_bases.doujin_sync.move(on_deck, "/sd/games")
+    assert f"{DECK}/maid/Game.exe" in deck_fs.files

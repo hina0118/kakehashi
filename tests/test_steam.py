@@ -493,3 +493,23 @@ def test_remove_clears_art_records(steam_ctx):
     assert steam_ctx._doujin_db.art_states(gid)
     steam_ctx.steam.remove([gid], Job("t", "t"))
     assert steam_ctx._doujin_db.art_states(gid) == {}
+
+
+def test_move_to_another_base_then_apply_repoints_same_shortcut(steam_ctx, deck_fs):
+    gid = steam_ctx.test_game_id
+    steam_ctx.config.steam_deck = DeckPaths(**{**steam_ctx.config.steam_deck.model_dump(), "doujin_base": ["/deck/games", "/sd/games"]})
+    deck_fs.files.update({"/deck/games/Game/Game.exe": "x", "/sd/games/Other/a.exe": "x"})
+    [first] = steam_ctx.steam.apply([gid], Job("t", "t"))
+
+    deck_fs.steam_running = True
+    with pytest.raises(SteamRunningError):
+        steam_ctx.doujin_sync.move(gid, "/sd/games")
+    assert "/deck/games/Game/Game.exe" in deck_fs.files
+
+    deck_fs.steam_running = False
+    assert steam_ctx.doujin_sync.move(gid, "/sd/games").deck_dir == "/sd/games/Game"
+    [r] = steam_ctx.steam.apply([gid], Job("t", "t"))
+    sc = Shortcuts(deck_fs.read_bytes(SC_PATH))
+    assert (r.appid, len(sc.entries())) == (first.appid, 1)  # 同じ登録を引き継ぐ（プレイ記録が残る）
+    assert sc.find(r.appid).get("Exe") == '"/sd/games/Game/Game.exe"'
+    assert sc.find(r.appid).get("StartDir") == '"/sd/games/Game"'

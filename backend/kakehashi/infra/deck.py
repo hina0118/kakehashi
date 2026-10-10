@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import posixpath
+import shlex
 import stat as _stat
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -41,7 +42,9 @@ class TransferFS(RemoteFS, Protocol):
     def list_attrs(self, path: str) -> dict[str, tuple[int, int]]: ...
     def walk_attrs(self, path: str) -> dict[str, tuple[int, int]]: ...
     def walk_files(self, path: str) -> Iterator[str]: ...
-    def run(self, command: str, timeout: float = 30) -> tuple[int, str, str]: ...
+    def run(self, command: str, timeout: float | None = 30) -> tuple[int, str, str]: ...
+    def disk(self, path: str) -> tuple[int, int]: ...
+    def move(self, src: str, dst: str) -> None: ...
     def upload(
         self, tasks: list[tuple[Path, str]], overwrite: bool = False,
         on_progress: Callable[[int, int], None] | None = None,
@@ -231,10 +234,25 @@ class DeckClient:
                     on_progress(i, total)
         return result
 
-    def run(self, command: str, timeout: float = 30) -> tuple[int, str, str]:
+    def run(self, command: str, timeout: float | None = 30) -> tuple[int, str, str]:
         _stdin, stdout, stderr = self._ssh.exec_command(command, timeout=timeout)
         code = stdout.channel.recv_exit_status()
         return code, stdout.read().decode("utf-8", "replace"), stderr.read().decode("utf-8", "replace")
+
+    def disk(self, path: str) -> tuple[int, int]:
+        """path があるファイルシステムの (デバイス番号, 空き容量[バイト])。"""
+        q = shlex.quote(path)
+        code, out, err = self.run(f"stat -c %d -- {q} && df -B1 --output=avail -- {q} | tail -n 1")
+        lines = out.split()
+        if code != 0 or len(lines) < 2:
+            raise DeckConnectionError(f"空き容量を確認できませんでした: {path}: {err.strip()}")
+        return int(lines[0]), int(lines[-1])
+
+    def move(self, src: str, dst: str) -> None:
+        """フォルダを移動する。別のドライブ（内蔵⇔SDカード）へはコピーしてから元を消す（mv と同じ）。"""
+        code, _out, err = self.run(f"mv -n -- {shlex.quote(src)} {shlex.quote(dst)}", timeout=None)
+        if code != 0 or self.exists(src) or not self.exists(dst):
+            raise DeckConnectionError(f"移動できませんでした: {src} → {dst}: {err.strip()}")
 
 
 @contextmanager
