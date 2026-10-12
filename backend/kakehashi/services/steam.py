@@ -15,10 +15,11 @@ from datetime import datetime
 from typing import Callable
 
 from PIL import Image
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
 
 from kakehashi.config import Config
 from kakehashi.domain.doujin import DoujinGame, guess_from_folder_name
+from kakehashi.domain.launch_options import merge_launch_options
 from kakehashi.imaging import steam_art
 from kakehashi.infra.deck import DeckConnector, TransferFS, write_with_backup
 from kakehashi.infra.doujin_db import DoujinDB
@@ -69,6 +70,24 @@ class SteamShortcut(BaseModel):
     """このappIDを持つ台帳の作品"""
     match_id: int | None = None
     """まだSteamと紐づいていない台帳の作品のうち、同じ起動ファイルを指すもの（取り込むと紐づける）"""
+
+
+class SettingsPlanItem(BaseModel):
+    """まとめて設定したときの、作品ごとの変化。"""
+    id: int
+    title: str
+    registered: bool
+    compat_before: str
+    compat_after: str
+    options_before: str
+    options_after: str
+    added: list[str] = []
+    replaced: list[str] = []
+
+    @computed_field
+    @property
+    def changed(self) -> bool:
+        return self.compat_before != self.compat_after or self.options_before != self.options_after
 
 
 class SteamScan(BaseModel):
@@ -263,6 +282,44 @@ class SteamService:
                 })
             result.append(self._doujin.get(row["id"]))
         return result
+
+    # ---- Proton・起動オプションをまとめて設定する ----
+
+    def plan_settings(self, ids: list[int], compat_tool: str = "", add_options: str = "") -> list[SettingsPlanItem]:
+        """Proton（空なら変えない）と、足す起動オプションを当てたときの変化を調べる（まだ書き込まない）。
+
+        起動オプションは、Steamに登録済みならSteamの今の値に足す（無ければ台帳の値か既定値）。
+        """
+        defaults = self._get_config().steam_deck
+        current = {sc.linked_id: sc for sc in self.scan_shortcuts().shortcuts if sc.linked_id is not None}
+        plan = []
+        for game_id in ids:
+            game = self._doujin.get(game_id)
+            sc = current.get(game_id) if game.steam_registered_at else None
+            compat_before = sc.compat_tool if sc else (game.compat_tool or defaults.default_compat_tool)
+            options_before = sc.launch_options if sc else (game.launch_options or defaults.default_launch_options)
+            merged = merge_launch_options(options_before, add_options) if add_options.strip() else None
+            plan.append(SettingsPlanItem(
+                id=game.id, title=game.title, registered=sc is not None,
+                compat_before=compat_before, compat_after=compat_tool or compat_before,
+                options_before=options_before, options_after=merged.options if merged else options_before,
+                added=merged.added if merged else [], replaced=merged.replaced if merged else [],
+            ))
+        return plan
+
+    def apply_settings(self, ids: list[int], job: Job, compat_tool: str = "", add_options: str = "") -> list[SteamGameResult]:
+        """まとめて設定し、Steamに登録済みの作品はSteamにも反映する。変わらない作品には触れない。"""
+        with self._connect() as fs:
+            if self._is_running(fs):
+                raise SteamRunningError(
+                    "DeckでSteamが起動しています。デスクトップモードに切り替え、Steamを終了してから実行してください。"
+                )
+        plan = [p for p in self.plan_settings(ids, compat_tool, add_options) if p.changed]
+        for p in plan:
+            self._db.update(p.id, {"compat_tool": p.compat_after, "launch_options": p.options_after})
+        job.log(f"{len(plan)}件の設定を変更します（{len(ids) - len(plan)}件は変更なし）")
+        registered = [p.id for p in plan if p.registered]
+        return self.apply(registered, job) if registered else []
 
     # ---- Steamに設定済みの画像を台帳へ取り込む ----
 

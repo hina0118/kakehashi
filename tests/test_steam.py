@@ -513,3 +513,57 @@ def test_move_to_another_base_then_apply_repoints_same_shortcut(steam_ctx, deck_
     assert (r.appid, len(sc.entries())) == (first.appid, 1)  # 同じ登録を引き継ぐ（プレイ記録が残る）
     assert sc.find(r.appid).get("Exe") == '"/sd/games/Game/Game.exe"'
     assert sc.find(r.appid).get("StartDir") == '"/sd/games/Game"'
+
+
+@pytest.mark.parametrize("current, add, expected", [
+    # 同じものがあれば足さない
+    ("LANG=ja_JP.UTF-8 %command%", "LANG=ja_JP.UTF-8 %command%", "LANG=ja_JP.UTF-8 %command%"),
+    # 環境変数は %command% の前、引数は後ろに足す
+    ("LANG=ja_JP.UTF-8 %command%", "PROTON_USE_WINED3D=1", "LANG=ja_JP.UTF-8 PROTON_USE_WINED3D=1 %command%"),
+    ("LANG=ja_JP.UTF-8 %command% -windowed", "-windowed -nosound", "LANG=ja_JP.UTF-8 %command% -windowed -nosound"),
+    # 環境変数はラッパーより前に置く
+    ("gamemoderun %command%", "LANG=ja_JP.UTF-8", "LANG=ja_JP.UTF-8 gamemoderun %command%"),
+    # 空や %command% の無い値（全体が引数）にも足せる
+    ("", "LANG=ja_JP.UTF-8 %command%", "LANG=ja_JP.UTF-8 %command%"),
+    ("-windowed", "LANG=ja_JP.UTF-8", "LANG=ja_JP.UTF-8 %command% -windowed"),
+    ("", "-windowed", "-windowed"),
+    # 引用符の中の空白で区切らない
+    ('WINEDLLOVERRIDES="d3d9=n,b dinput8=n,b" %command%', 'WINEDLLOVERRIDES="d3d9=n,b dinput8=n,b"',
+     'WINEDLLOVERRIDES="d3d9=n,b dinput8=n,b" %command%'),
+])
+def test_merge_launch_options(current, add, expected):
+    from kakehashi.domain.launch_options import merge_launch_options
+    assert merge_launch_options(current, add).options == expected
+
+
+def test_merge_launch_options_replaces_same_env_key():
+    from kakehashi.domain.launch_options import merge_launch_options
+    r = merge_launch_options("LANG=en_US.UTF-8 %command%", "LANG=ja_JP.UTF-8")
+    assert (r.options, r.replaced) == ("LANG=ja_JP.UTF-8 %command%", ["LANG=en_US.UTF-8 → LANG=ja_JP.UTF-8"])
+
+
+def test_apply_settings_merges_into_current_steam_values(real_like, deck_fs):
+    ctx = real_like
+    imported = {g.title: g.id for g in ctx.steam.import_shortcuts([3748535911, 2422716232])}
+    ids = list(imported.values())
+
+    plan = {p.id: p for p in ctx.steam.plan_settings(ids, "GE-Proton10-25", "LANG=ja_JP.UTF-8 %command%")}
+    alm = plan[imported["★アルム冒険者団"]]
+    assert (alm.compat_before, alm.compat_after) == ("GE-Proton9-14", "GE-Proton10-25")
+    assert (alm.options_before, alm.options_after, alm.added) == ("", "LANG=ja_JP.UTF-8 %command%", ["LANG=ja_JP.UTF-8"])
+
+    deck_fs.steam_running = True
+    with pytest.raises(SteamRunningError):
+        ctx.steam.apply_settings(ids, Job("t", "t"), "GE-Proton10-25", "LANG=ja_JP.UTF-8 %command%")
+    assert ctx.doujin.get(ids[0]).compat_tool == "GE-Proton9-14"  # 止めたときは台帳も変えない
+
+    deck_fs.steam_running = False
+    results = ctx.steam.apply_settings(ids, Job("t", "t"), "GE-Proton10-25", "LANG=ja_JP.UTF-8 %command%")
+    assert [r.error for r in results] == [None, None]
+    sc = Shortcuts(deck_fs.read_bytes(SC_PATH))
+    cfg = text_vdf.loads(deck_fs.read_text(CFG_PATH))
+    for appid in (3748535911, 2422716232):
+        assert sc.find(appid).get("LaunchOptions") == "LANG=ja_JP.UTF-8 %command%"
+        assert get_compat_tool(cfg, appid) == "GE-Proton10-25"
+    # もう一度当てても変化なし（同じものは足さない）
+    assert not any(p.changed for p in ctx.steam.plan_settings(ids, "GE-Proton10-25", "LANG=ja_JP.UTF-8 %command%"))

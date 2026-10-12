@@ -11,6 +11,7 @@ import { DoujinDetail } from './DoujinDetail'
 import { DuplicateDialog } from './DuplicateDialog'
 import { SteamBulkDialog } from './SteamBulkDialog'
 import { SteamImportDialog } from './SteamImportDialog'
+import { SteamSettingsDialog } from './SteamSettingsDialog'
 import { UpdateDialog } from './UpdateDialog'
 
 type Sort = 'title' | 'circle' | 'updated' | 'created' | 'release'
@@ -35,7 +36,7 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const settings = useQuery({ queryKey: ['settings'], queryFn: api.settings })
   const [steamFilter, setSteamFilter] = useState<'' | 'on' | 'off'>('')
   const [sort, setSort] = useState<Sort>('title')
-  const [dialog, setDialog] = useState<'bulk' | 'deck' | 'deck-check' | 'steam' | 'steam-import' | null>(null)
+  const [dialog, setDialog] = useState<'bulk' | 'deck' | 'deck-check' | 'steam' | 'steam-import' | 'steam-settings' | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [duplicate, setDuplicate] = useState<{ path: string; hits: DuplicateHit[] } | null>(null)
   const [updating, setUpdating] = useState<{ game: DoujinGame; source: string } | null>(null)
@@ -113,6 +114,9 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
         <button className="btn" onClick={() => setDialog('deck-check')}>Deckと照合</button>
         <button className="btn" onClick={() => setDialog('steam-import')}>Steamから取り込み</button>
         <button className="btn" onClick={() => setDialog('steam')}>Steamにまとめて反映</button>
+        <button className="btn" onClick={() => setDialog('steam-settings')} title="一覧で絞り込んでいる作品が対象">
+          Proton・起動オプション
+        </button>
         <div className="toolbar-spacer" />
         {notice && <span className="notice">{notice}</span>}
       </div>
@@ -262,6 +266,16 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
           onApplied={(g) => {
             upsert(g)
             setNotice(`「${g.title}」に更新データを適用しました。「Deckへ反映」で送ってください。`)
+          }}
+        />
+      )}
+      {dialog === 'steam-settings' && (
+        <SteamSettingsDialog
+          games={rows}
+          onClose={() => setDialog(null)}
+          onDone={(updated, message) => {
+            updated.forEach(upsert)
+            setNotice(message)
           }}
         />
       )}

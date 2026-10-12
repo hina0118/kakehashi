@@ -7,7 +7,7 @@ from kakehashi.api.deps import Ctx
 from kakehashi.errors import NotFoundError
 from kakehashi.services.jobs import JobView
 from kakehashi.domain.doujin import DoujinGame
-from kakehashi.services.steam import ArtDecision, GridImage, SteamScan, SteamStatus, art_png
+from kakehashi.services.steam import ArtDecision, GridImage, SettingsPlanItem, SteamScan, SteamStatus, art_png
 
 router = APIRouter(tags=["steam"])
 
@@ -44,6 +44,26 @@ def apply(ctx: Ctx, body: ApplyRequest) -> JobView:
     return ctx.jobs.submit(
         "steam.apply", f"Steamに{len(body.ids)}件を登録",
         lambda job: [r.model_dump() for r in ctx.steam.apply(body.ids, job, overwrite_art=body.overwrite_art)],
+    )
+
+
+class SettingsRequest(IdsRequest):
+    compat_tool: str = ""
+    """Protonのツール名（空なら変えない）"""
+    add_options: str = ""
+    """足す起動オプション（すでにあるものは足さない）"""
+
+
+@router.post("/settings/plan")
+def plan_settings(ctx: Ctx, body: SettingsRequest) -> list[SettingsPlanItem]:
+    return ctx.steam.plan_settings(body.ids, body.compat_tool, body.add_options)
+
+
+@router.post("/settings/apply")
+def apply_settings(ctx: Ctx, body: SettingsRequest) -> JobView:
+    return ctx.jobs.submit(
+        "steam.settings", f"{len(body.ids)}件のProton・起動オプションを設定",
+        lambda job: [r.model_dump() for r in ctx.steam.apply_settings(body.ids, job, body.compat_tool, body.add_options)],
     )
 
 

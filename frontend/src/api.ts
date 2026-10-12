@@ -445,6 +445,19 @@ export type ArtPullResult = { id: number; title: string; imported: string[]; ski
 export const steamGridImageUrl = (gameId: number, kind: string, filename: string) =>
   `/api/steam/grid/${gameId}/${kind}?v=${encodeURIComponent(filename)}`
 
+export type SettingsPlanItem = {
+  id: number
+  title: string
+  registered: boolean
+  compat_before: string
+  compat_after: string
+  options_before: string
+  options_after: string
+  added: string[]
+  replaced: string[]
+  changed: boolean
+}
+
 export const steamApi = {
   gridImages: (id: number) => request<GridImage[]>(`/api/steam/grid/${id}`),
   artStatus: (id: number) => request<ArtDecision[]>(`/api/steam/art-status/${id}`),
@@ -452,6 +465,10 @@ export const steamApi = {
     post<JobView<ArtPullResult[]>>('/api/steam/pull-art', { ids, kinds: kinds ?? null, overwrite }),
   status: () => request<SteamStatus>('/api/steam/status'),
   compatTools: () => request<string[]>('/api/steam/compat-tools'),
+  planSettings: (ids: number[], compatTool: string, addOptions: string) =>
+    post<SettingsPlanItem[]>('/api/steam/settings/plan', { ids, compat_tool: compatTool, add_options: addOptions }),
+  applySettings: (ids: number[], compatTool: string, addOptions: string) =>
+    post<JobView<SteamGameResult[]>>('/api/steam/settings/apply', { ids, compat_tool: compatTool, add_options: addOptions }),
   shortcuts: () => request<SteamScan>('/api/steam/shortcuts'),
   importShortcuts: (appids: number[]) => post<DoujinGame[]>('/api/steam/import', { appids }),
   apply: (ids: number[], overwriteArt = false) =>
