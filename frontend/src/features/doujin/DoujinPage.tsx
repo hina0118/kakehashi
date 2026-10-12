@@ -30,7 +30,9 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<PlayStatus | ''>('')
   const [tag, setTag] = useState('')
-  const [deckFilter, setDeckFilter] = useState<'' | 'on' | 'off'>('')
+  // '' / 'on' / 'off' / 'other'（格納先の外）/ 格納先のパス
+  const [deckFilter, setDeckFilter] = useState('')
+  const settings = useQuery({ queryKey: ['settings'], queryFn: api.settings })
   const [steamFilter, setSteamFilter] = useState<'' | 'on' | 'off'>('')
   const [sort, setSort] = useState<Sort>('title')
   const [dialog, setDialog] = useState<'bulk' | 'deck' | 'deck-check' | 'steam' | 'steam-import' | null>(null)
@@ -39,6 +41,12 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [updating, setUpdating] = useState<{ game: DoujinGame; source: string } | null>(null)
 
   const all = useMemo(() => games.data ?? [], [games.data])
+  const bases = useMemo(
+    () => (settings.data?.steam_deck.doujin_base ?? []).map((b) => b.replace(/\/+$/, '')),
+    [settings.data],
+  )
+  const inBase = (g: DoujinGame, base: string) => g.deck_dir.startsWith(`${base}/`)
+  const hasOther = all.some((g) => g.deck_dir && !bases.some((b) => inBase(g, b)))
   const allTags = useMemo(() => [...new Set(all.flatMap((g) => g.tags))].sort((a, b) => a.localeCompare(b, 'ja')), [all])
 
   const rows = useMemo(() => {
@@ -46,11 +54,16 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
     return all
       .filter((g) => !status || g.play_status === status)
       .filter((g) => !tag || g.tags.includes(tag))
-      .filter((g) => !deckFilter || (deckFilter === 'on') === !!g.deck_dir)
+      .filter((g) => {
+        if (!deckFilter) return true
+        if (deckFilter === 'on' || deckFilter === 'off') return (deckFilter === 'on') === !!g.deck_dir
+        if (deckFilter === 'other') return !!g.deck_dir && !bases.some((b) => g.deck_dir.startsWith(`${b}/`))
+        return g.deck_dir.startsWith(`${deckFilter}/`)
+      })
       .filter((g) => !steamFilter || (steamFilter === 'on') === !!g.steam_registered_at)
       .filter((g) => !q || [g.title, g.circle, g.work_id, ...g.tags].join(' ').toLowerCase().includes(q))
       .sort(SORTERS[sort])
-  }, [all, query, status, tag, deckFilter, steamFilter, sort])
+  }, [all, query, status, tag, deckFilter, bases, steamFilter, sort])
 
   const current = all.find((g) => g.id === selected) ?? null
 
@@ -119,10 +132,18 @@ export function DoujinPage({ onOpenSettings }: { onOpenSettings: () => void }) {
                 <option value="">すべてのタグ</option>
                 {allTags.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
-              <select value={deckFilter} onChange={(e) => setDeckFilter(e.target.value as '' | 'on' | 'off')} aria-label="Deckへの転送">
+              <select value={deckFilter} onChange={(e) => setDeckFilter(e.target.value)} aria-label="Deckの保存場所">
                 <option value="">Deck: すべて</option>
                 <option value="on">Deckにある</option>
                 <option value="off">Deckに無い</option>
+                {bases.length > 0 && (
+                  <optgroup label="格納先">
+                    {bases.map((b) => (
+                      <option key={b} value={b}>{b} ({all.filter((g) => inBase(g, b)).length})</option>
+                    ))}
+                    {hasOther && <option value="other">格納先の外</option>}
+                  </optgroup>
+                )}
               </select>
               <select value={steamFilter} onChange={(e) => setSteamFilter(e.target.value as '' | 'on' | 'off')} aria-label="Steamへの登録">
                 <option value="">Steam: すべて</option>
